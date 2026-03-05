@@ -61,40 +61,50 @@ theme_set(
 
 ```{r}
 daily_accidents <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents.csv')
-daily_accidents_420 <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents_420.csv')
 ```
 
 ## Background
 
 In 2018, Harper and Palayew published a study in *JAMA Internal Medicine* examining whether April 20th --- widely associated with cannabis celebration --- sees an increase in fatal traffic accidents in the United States. Using data from the Fatality Analysis Reporting System (FARS), they reported a statistically significant increase in crash risk on 4/20 compared to control dates one week before and after.
 
-This finding attracted considerable attention, but also scrutiny. Critics noted that the choice of control dates and analytical decisions could influence the result. This report revisits the question using the same FARS-derived dataset from TidyTuesday, exploring whether the "4/20 effect" holds up under visual and statistical examination.
+This finding attracted considerable attention, but also scrutiny. Critics noted that the choice of control dates and analytical decisions could influence the result. This report revisits the question using FARS-derived data from TidyTuesday, exploring whether the "4/20 effect" holds up under visual and statistical examination.
 
 ---
 
 ## Data Overview
 
 ```{r}
-daily_accidents_420 <- daily_accidents_420 |>
+daily_full <- daily_accidents |>
   mutate(
-    year  = year(date),
-    month = month(date),
-    wday  = wday(date, label = TRUE)
+    year   = year(date),
+    month  = month(date),
+    day    = day(date),
+    wday   = wday(date, label = TRUE),
+    is_420 = month == 4 & day == 20
   )
 
-year_range <- range(daily_accidents_420$year)
-n_days <- nrow(daily_accidents_420)
-n_420  <- sum(daily_accidents_420$e420 == TRUE, na.rm = TRUE)
+# Define control dates: April 13 and April 27 (one week before/after)
+# This matches the original Harper & Palayew control strategy
+study_data <- daily_full |>
+  filter(month == 4 & day %in% c(13, 20, 27)) |>
+  mutate(group = if_else(is_420, "April 20th", "Control Dates"))
+
+year_range <- range(daily_full$year)
+n_total    <- nrow(daily_full)
+n_420      <- sum(study_data$is_420)
+n_ctrl     <- sum(!study_data$is_420)
 ```
 
-The dataset contains **`r comma(n_days)` daily observations** of fatal traffic accidents in the US, spanning **`r year_range[1]`--`r year_range[2]`**. Of these, **`r n_420` days** fall on April 20th (flagged as `e420 = TRUE`). The remaining days serve as comparison dates drawn from the same time window each year (one week before and after 4/20).
+The dataset contains **`r comma(n_total)` daily observations** of fatal traffic accidents in the US, spanning **`r year_range[1]`--`r year_range[2]`**.
+
+Following the original Harper & Palayew design, we compare April 20th to **control dates one week before and after** (April 13th and April 27th). This yields **`r n_420` April 20th observations** and **`r n_ctrl` control observations** across the study period.
 
 | Metric | Value |
 |--------|-------|
-| Total daily observations | `r comma(n_days)` |
+| Full dataset observations | `r comma(n_total)` |
 | Date range | `r year_range[1]`--`r year_range[2]` |
 | April 20th observations | `r n_420` |
-| Mean daily fatalities | `r round(mean(daily_accidents_420$fatalities_count, na.rm = TRUE), 1)` |
+| Control date observations | `r n_ctrl` |
 
 ---
 
@@ -104,59 +114,54 @@ The dataset contains **`r comma(n_days)` daily observations** of fatal traffic a
 
 ```{r}
 #| fig-cap: "Daily traffic fatalities over the study period with April 20th dates highlighted."
-#| fig-alt: "Scatter plot showing daily fatalities from 1992 to 2016 with 4/20 dates in red and control dates in grey."
+#| fig-alt: "Scatter plot showing daily fatalities from 1975 to 2018 with 4/20 dates in red and all other dates in grey."
 
-ctrl_pts <- filter(daily_accidents_420, is.na(e420) | e420 == FALSE)
-apr_pts  <- filter(daily_accidents_420, e420 == TRUE)
-
-ggplot(daily_accidents_420, aes(date, fatalities_count)) +
-  geom_point(data = ctrl_pts, color = grey_m, size = 1.4, alpha = 0.5) +
-  geom_smooth(method = "loess", se = FALSE, color = blue, linewidth = 0.7, alpha = 0.5) +
-  geom_point(data = apr_pts, fill = red, color = "white", size = 3.2,
+ggplot(daily_full, aes(date, fatalities_count)) +
+  geom_point(data = filter(daily_full, !is_420),
+             color = grey_m, size = 0.4, alpha = 0.15) +
+  geom_smooth(method = "loess", se = FALSE, color = blue,
+              linewidth = 0.7, alpha = 0.5) +
+  geom_point(data = filter(daily_full, is_420),
+             fill = red, color = "white", size = 3.2,
              shape = 21, stroke = 0.7) +
   scale_y_continuous(expand = expansion(mult = c(0.02, 0.05))) +
   labs(
-    title = "Daily Traffic Fatalities, 1992\u20132016",
-    subtitle = glue::glue(
+    title = "Daily Traffic Fatalities, {year_range[1]}\u2013{year_range[2]}" |>
+      glue(),
+    subtitle = glue(
       "<span style='color:{red}'>**\u25CF April 20th**</span> dates shown against ",
-      "<span style='color:{grey_m}'>**\u25CF control dates**</span> (one week before & after)"
+      "<span style='color:{grey_m}'>**all other days**</span>"
     ),
     x = NULL, y = NULL
   )
 ```
 
-The overall downward trend in fatalities across the study period is immediately apparent. April 20th dates appear scattered within the range of their neighboring control dates, with no obvious visual outliers.
+The overall downward trend in fatalities across the study period is immediately apparent. April 20th dates appear scattered within the range of their surrounding dates, with no obvious visual outliers.
 
 ### Direct Comparison: 4/20 vs. Control Dates
 
 ```{r}
-#| fig-cap: "Raincloud plot comparing fatality distributions on April 20th and control dates."
+#| fig-cap: "Raincloud plot comparing fatality distributions on April 20th and control dates (April 13 and 27)."
 #| fig-alt: "Half-violin density, boxplot, and jittered points comparing April 20th to control date fatalities."
 #| fig.height: 4.5
 
-comparison_data <- daily_accidents_420 |>
-  filter(!is.na(e420)) |>
-  mutate(group = if_else(e420, "April 20th", "Control Dates") |>
-           fct_rev())
+comparison_data <- study_data |>
+  mutate(group = fct_rev(factor(group)))
 
 group_means <- comparison_data |>
   group_by(group) |>
   summarise(m = mean(fatalities_count), .groups = "drop")
 
 ggplot(comparison_data, aes(x = group, y = fatalities_count, fill = group, color = group)) +
-  # Half-violin (density)
   stat_halfeye(
     adjust = 0.6, width = 0.5, justification = -0.18,
     .width = 0, point_colour = NA, slab_alpha = 0.35
   ) +
-  # Boxplot
   geom_boxplot(width = 0.12, outlier.shape = NA, alpha = 0.4, linewidth = 0.5) +
-  # Jittered raw points
   geom_point(
     position = position_jitter(seed = 42, width = 0.04),
     size = 1.4, alpha = 0.3, shape = 16
   ) +
-  # Mean labels (outside the plot area)
   geom_text(
     data = group_means, aes(x = group, y = m, label = paste0("mean = ", round(m, 1))),
     nudge_x = 0.38, size = 3.4, fontface = "bold", family = "outfit"
@@ -165,10 +170,10 @@ ggplot(comparison_data, aes(x = group, y = fatalities_count, fill = group, color
   scale_color_manual(values = c("April 20th" = red, "Control Dates" = blue)) +
   coord_flip(clip = "off") +
   labs(
-    title = "Fatality Distributions Overlap Substantially",
-    subtitle = glue::glue(
+    title = "April 20th vs. Control Dates (April 13 & 27)",
+    subtitle = glue(
       "<span style='color:{red}'>**April 20th**</span> vs. ",
-      "<span style='color:{blue}'>**control dates**</span> ",
+      "<span style='color:{blue}'>**control dates**</span> one week before & after ",
       "&mdash; density, box plot, and raw observations"
     ),
     x = NULL, y = "Fatalities"
@@ -203,38 +208,38 @@ How does April 20th compare to its control dates within each year? This dumbbell
 #| fig.height: 7
 
 yearly_ctrl <- comparison_data |>
-  filter(!e420) |>
+  filter(!is_420) |>
   group_by(year) |>
   summarise(ctrl_mean = mean(fatalities_count), .groups = "drop")
 
 paired <- yearly_ctrl |>
   left_join(
-    comparison_data |> filter(e420) |> select(year, apr_fat = fatalities_count),
+    comparison_data |> filter(is_420) |> select(year, apr_fat = fatalities_count),
     by = "year"
   ) |>
   filter(!is.na(apr_fat)) |>
   mutate(above = apr_fat > ctrl_mean)
 
+n_above <- sum(paired$above)
+n_years <- nrow(paired)
+
 ggplot(paired, aes(y = factor(year))) +
-  # Connecting segment -- coloured by direction
   geom_segment(
     aes(x = ctrl_mean, xend = apr_fat, yend = factor(year),
         color = above),
     linewidth = 0.8
   ) +
-  # Control mean point
   geom_point(aes(x = ctrl_mean), fill = blue, color = "white",
              shape = 21, size = 4.5, stroke = 0.9) +
-  # April 20th point
   geom_point(aes(x = apr_fat), fill = red, color = "white",
              shape = 21, size = 4.5, stroke = 0.9) +
   scale_color_manual(values = c("TRUE" = red, "FALSE" = blue)) +
   labs(
-    title = "April 20th vs. Control Mean — Year by Year",
-    subtitle = glue::glue(
+    title = "April 20th vs. Control Mean \u2014 Year by Year",
+    subtitle = glue(
       "<span style='color:{red}'>**\u25CF April 20th**</span> connected to ",
-      "<span style='color:{blue}'>**\u25CF control mean**</span> — ",
-      "no consistent pattern of elevated fatalities"
+      "<span style='color:{blue}'>**\u25CF control mean**</span> \u2014 ",
+      "4/20 exceeds controls in {n_above} of {n_years} years"
     ),
     x = "Fatalities", y = NULL
   ) +
@@ -254,8 +259,7 @@ Traffic fatalities follow strong weekly cycles --- weekends are deadlier. If Apr
 #| fig-alt: "Bar chart of average fatalities by day of week with values labeled."
 #| fig.height: 4
 
-dow_data <- daily_accidents_420 |>
-  filter(!is.na(e420)) |>
+dow_data <- daily_full |>
   group_by(wday) |>
   summarise(m = mean(fatalities_count), .groups = "drop") |>
   mutate(is_weekend = wday %in% c("Fri", "Sat", "Sun"))
@@ -270,7 +274,7 @@ ggplot(dow_data, aes(wday, m, fill = is_weekend)) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
   labs(
     title = "The Weekend Effect",
-    subtitle = glue::glue(
+    subtitle = glue(
       "<span style='color:{red}'>**Fri\u2013Sun**</span> show substantially higher ",
       "fatality counts than <span style='color:{blue}'>**weekdays**</span> ",
       "&mdash; a key confound to control for"
@@ -285,18 +289,18 @@ ggplot(dow_data, aes(wday, m, fill = is_weekend)) +
 
 ### Model: Controlling for Year and Day of Week
 
-A simple comparison of means can be misleading if April 20th dates differ systematically from controls. The linear model below estimates the 4/20 effect while adjusting for both year and day of week.
+A simple comparison of means can be misleading if April 20th dates differ systematically from controls in their day-of-week distribution. The linear model below estimates the 4/20 effect while adjusting for both year and day of week.
 
 ```{r}
 model_full <- lm(
-  fatalities_count ~ e420 + year + wday,
-  data = filter(daily_accidents_420, !is.na(e420))
+  fatalities_count ~ is_420 + year + wday,
+  data = study_data
 )
 
 tidy_model <- tidy(model_full, conf.int = TRUE) |>
   mutate(across(where(is.numeric), \(x) round(x, 2)))
 
-effect_row <- tidy_model |> filter(term == "e420TRUE")
+effect_row <- tidy_model |> filter(term == "is_420TRUE")
 glance_model <- glance(model_full)
 ```
 
@@ -305,20 +309,19 @@ knitr::kable(
   tidy_model |>
     select(Term = term, Estimate = estimate, SE = std.error,
            `CI Low` = conf.low, `CI High` = conf.high, p = p.value),
-  caption = "Linear regression: fatalities ~ 4/20 + year + day-of-week"
+  caption = "Linear regression: fatalities ~ April 20th + year + day-of-week"
 )
 ```
 
-**Key result**: The estimated effect of April 20th is **`r effect_row$estimate` additional fatalities** (95% CI: `r effect_row$conf.low` to `r effect_row$conf.high`, p = `r effect_row$p.value`). The model explains **`r round(glance_model$r.squared * 100, 1)`%** of variance.
+**Key result**: The estimated effect of April 20th is **`r effect_row$estimate` fatalities** compared to control dates (95% CI: `r effect_row$conf.low` to `r effect_row$conf.high`, p = `r effect_row$p.value`). The model explains **`r round(glance_model$r.squared * 100, 1)`%** of variance.
 
 ```{r}
-#| fig-cap: "Day-of-week effect of model coefficients with 95% confidence intervals."
+#| fig-cap: "Day-of-week effect and April 20th model coefficient with 95% confidence intervals."
 #| fig-alt: "Two panel plot: left shows mean fatalities by weekday with CIs; right shows the April 20th model estimate with its confidence interval."
 #| fig.height: 4.5
 
-# Day-of-week observed means with 95% CI
-dow_emm <- daily_accidents_420 |>
-  filter(!is.na(e420)) |>
+# Day-of-week observed means with 95% CI (from the study dates)
+dow_emm <- study_data |>
   group_by(wday) |>
   summarise(
     emmean = mean(fatalities_count),
@@ -343,7 +346,7 @@ p_dow <- ggplot(dow_emm, aes(x = emmean, y = reorder(wday, emmean))) +
   ) +
   theme(panel.grid.major.y = element_blank())
 
-# April 20th adjusted effect in isolation
+# April 20th adjusted effect
 p_420 <- effect_row |>
   mutate(label = "April 20th\nvs. controls") |>
   ggplot(aes(x = estimate, y = label)) +
@@ -355,7 +358,7 @@ p_420 <- effect_row |>
   geom_point(fill = red, color = "white", shape = 21, size = 5, stroke = 1) +
   labs(
     title = "April 20th Effect (Adjusted)",
-    subtitle = glue::glue(
+    subtitle = glue(
       "Estimate: **{effect_row$estimate}** fatalities ",
       "(95% CI: {effect_row$conf.low} to {effect_row$conf.high})"
     ),
@@ -369,32 +372,9 @@ p_420 <- effect_row |>
 p_dow + p_420 + plot_layout(widths = c(1.4, 1))
 ```
 
-### Zooming Out: the Full FARS Dataset
+### Zooming Out: All Calendar Dates
 
-The comparison dataset only includes dates near April 20th. The broader `daily_accidents` dataset covers every day of the year. Does April 20th stand out among *all* calendar dates?
-
-```{r}
-daily_full <- daily_accidents |>
-  mutate(
-    year   = year(date),
-    month  = month(date),
-    wday   = wday(date, label = TRUE),
-    is_420 = month(date) == 4 & day(date) == 20
-  )
-
-full_summary <- daily_full |>
-  group_by(is_420) |>
-  summarise(
-    Mean = round(mean(fatalities_count), 1),
-    Median = median(fatalities_count),
-    SD = round(sd(fatalities_count), 1),
-    N = n(), .groups = "drop"
-  ) |>
-  mutate(Group = if_else(is_420, "April 20th", "All Other Days")) |>
-  select(Group, Mean, Median, SD, N)
-
-knitr::kable(full_summary, caption = "Fatalities on April 20th vs. all other days (full FARS dataset)")
-```
+Does April 20th stand out among *all* calendar dates, not just its immediate neighbours?
 
 ```{r}
 #| fig-cap: "Average fatalities for each of the 366 possible calendar dates, with April 20th highlighted. The seasonal curve peaks in summer."
@@ -421,7 +401,6 @@ ggplot(daily_by_date, aes(fake_date, m)) +
               color = blue, linewidth = 0.6, alpha = 0.45) +
   geom_point(data = apr20_pt, fill = red, color = "white",
              shape = 21, size = 5, stroke = 1) +
-  # Direct label
   annotate(
     "text", x = apr20_pt$fake_date + 22, y = apr20_pt$m + 1,
     label = paste0("April 20th\n(rank ", apr20_rank, " of ", nrow(daily_by_date), ")"),
@@ -432,7 +411,7 @@ ggplot(daily_by_date, aes(fake_date, m)) +
                expand = expansion(add = c(5, 30))) +
   labs(
     title = "Where Does April 20th Rank Among All Calendar Dates?",
-    subtitle = glue::glue(
+    subtitle = glue(
       "Each point is one calendar date\u2019s average fatalities across all years &mdash; ",
       "<span style='color:{red}'>**April 20th**</span> is unremarkable"
     ),
@@ -465,7 +444,7 @@ ggplot(monthly_data, aes(month_label, fatalities_count, fill = is_april)) +
   scale_y_continuous(expand = expansion(mult = c(0.02, 0.05))) +
   labs(
     title = "Seasonal Pattern in Daily Fatalities",
-    subtitle = glue::glue(
+    subtitle = glue(
       "<span style='color:{red}'>**April**</span> sits in the spring transition ",
       "between winter lows and <span style='color:{blue}'>**summer peaks**</span>"
     ),
@@ -479,10 +458,9 @@ ggplot(monthly_data, aes(month_label, fatalities_count, fill = is_april)) +
 
 ```{r}
 sig <- effect_row$p.value < 0.05
-direction <- if_else(effect_row$estimate > 0, "higher", "lower")
 ```
 
-`r if(sig) paste0("The analysis finds a statistically significant effect: April 20th is associated with **", effect_row$estimate, " ", direction, " fatalities** compared to nearby control dates, after adjusting for year trends and day-of-week effects (p = ", effect_row$p.value, "). This is directionally consistent with the original Harper & Palayew finding.") else paste0("After controlling for year trends and day-of-week effects, the estimated 4/20 effect is ", effect_row$estimate, " fatalities (p = ", effect_row$p.value, "), which is **not statistically significant** at the conventional 0.05 threshold. The confidence interval spans from ", effect_row$conf.low, " to ", effect_row$conf.high, ", meaning we cannot rule out either a modest increase or no effect at all.")`
+`r if(sig && effect_row$estimate > 0) paste0("The analysis finds a statistically significant increase: April 20th is associated with **", effect_row$estimate, " additional fatalities** compared to control dates one week before and after, after adjusting for year trends and day-of-week effects (p = ", effect_row$p.value, "). This is directionally consistent with the original Harper & Palayew finding, though the visual evidence suggests April 20th is far from exceptional when viewed alongside all calendar dates.") else if(sig && effect_row$estimate < 0) paste0("The analysis finds a statistically significant *decrease*: April 20th is associated with **", abs(effect_row$estimate), " fewer fatalities** than control dates (p = ", effect_row$p.value, "). This contradicts the original Harper & Palayew finding.") else paste0("After controlling for year trends and day-of-week effects, the estimated 4/20 effect is ", effect_row$estimate, " fatalities (p = ", effect_row$p.value, "), which is **not statistically significant** at the conventional 0.05 threshold. The confidence interval spans from ", effect_row$conf.low, " to ", effect_row$conf.high, ", consistent with the visual evidence throughout this report: April 20th appears unremarkable compared to control dates and to all other calendar dates.")`
 
 However, several caveats are worth noting:
 
