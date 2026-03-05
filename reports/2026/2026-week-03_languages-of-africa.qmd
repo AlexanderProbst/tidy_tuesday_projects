@@ -1,0 +1,248 @@
+---
+title: "Languages of Africa: A Data Analysis"
+author: "Alexander Probst"
+date: "2026-01-17"
+categories: [2026, linguistics, geography]
+---
+
+```{r}
+#| include: false
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
+library(tidyverse)
+library(scales)
+library(viridis)
+
+africa <- read_csv(here::here("data", "2026", "africa_data.csv"))
+```
+
+## Executive Summary
+
+This report analyzes linguistic diversity across Africa using TidyTuesday data on African languages. The dataset contains **796 language-country observations** representing **502 unique languages** spoken across **51 African countries**, grouped into **17 language families**.
+
+**Note on Data Structure**: Each row represents a language spoken in a specific country. Languages spoken in multiple countries appear multiple times in the dataset, which allows us to analyze cross-border linguistic connections.
+
+**Note on Speaker Counts**: The `native_speakers` column captures **first-language (L1) speakers only**. This significantly underrepresents languages that serve as lingua francas — for example, Swahili has ~5.3 million native speakers in this dataset, but is estimated to have 100–150 million total speakers when including second-language (L2) use. Similarly, Arabic and other trade/regional languages will appear smaller than their true communicative reach. All speaker counts in this report should be interpreted with this caveat in mind.
+
+Key findings include:
+
+- **Extreme linguistic diversity**: Niger-Congo family dominates with 279 languages
+- **Language endangerment**: 23% of languages have fewer than 10,000 speakers (UNESCO endangerment threshold)
+- **Speaker concentration**: The top 10 languages account for 58% of all native speakers
+- **Cross-border connections**: 155 languages (31%) are spoken across multiple countries, with Arabic spanning 12 nations
+
+---
+
+## Data Overview
+
+```{r}
+languages_summary <- africa |>
+  group_by(language, family) |>
+  summarize(
+    total_speakers = max(native_speakers),
+    countries_count = n_distinct(country),
+    .groups = "drop"
+  )
+
+total_languages <- n_distinct(africa$language)
+total_families <- n_distinct(africa$family)
+total_countries <- n_distinct(africa$country)
+total_speakers <- sum(languages_summary$total_speakers)
+
+cat("Dataset contains:\n")
+cat("- Language-country pairs:", nrow(africa), "\n")
+cat("- Unique languages:", total_languages, "\n")
+cat("- Language families:", total_families, "\n")
+cat("- Countries:", total_countries, "\n")
+cat("- Total native speakers:", comma(total_speakers), "\n")
+```
+
+---
+
+## Language Families: The Niger-Congo Dominance
+
+The Niger-Congo family exhibits extraordinary diversity, containing more than half of all African languages in this dataset.
+
+```{r}
+family_summary <- languages_summary |>
+  group_by(family) |>
+  summarize(
+    n_languages = n(),
+    total_speakers = sum(total_speakers),
+    .groups = "drop"
+  ) |>
+  arrange(desc(n_languages))
+
+family_summary_long <- family_summary |>
+  filter(n_languages >= 4) |>
+  mutate(family_ordered = reorder(family, n_languages)) |>
+  pivot_longer(cols = c(n_languages, total_speakers),
+               names_to = "metric",
+               values_to = "value")
+
+ggplot(family_summary_long, aes(x = family_ordered, y = value, fill = metric)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma", begin = 0.3, end = 0.7,
+                       labels = c("Number of Languages", "Total Speakers")) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Language Families: Diversity vs. Speaker Population",
+    subtitle = "Families with 4+ languages",
+    x = "Language Family",
+    y = "Count",
+    fill = "Metric"
+  ) +
+  theme_minimal()
+```
+
+**Key Finding**: Niger-Congo has `r family_summary$n_languages[1]` languages but Afro-Asiatic (with only `r family_summary$n_languages[family_summary$family == "Afro-Asiatic"]` languages) has `r comma(family_summary$total_speakers[family_summary$family == "Afro-Asiatic"])` speakers, driven largely by Arabic.
+
+---
+
+## Most Spoken Languages
+
+```{r}
+top_languages <- languages_summary |>
+  slice_max(total_speakers, n = 10)
+
+top10_speakers <- sum(top_languages$total_speakers)
+concentration_pct <- round(100 * top10_speakers / total_speakers, 1)
+
+ggplot(top_languages, aes(x = reorder(language, total_speakers), y = total_speakers, fill = total_speakers)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  scale_fill_viridis_c(option = "viridis", direction = -1) +
+  labs(
+    title = "Top 10 Most Spoken African Languages",
+    subtitle = paste0("These languages represent ", concentration_pct, "% of all native speakers in the dataset"),
+    x = NULL,
+    y = "Native Speakers",
+    fill = "Speakers"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+**Key Finding**: Arabic dominates with 150 million speakers, followed by Hausa (85M) and Swahili (53M). The top 10 languages account for **`r concentration_pct`%** of all speakers, showing significant concentration despite high linguistic diversity. Note that these figures reflect **native (L1) speakers only** — languages like Swahili, which serve as a lingua franca across East Africa with over 100 million L2 speakers, are significantly underrepresented by this measure.
+
+---
+
+## Endangered Languages Crisis
+
+Using UNESCO's threshold of 10,000 speakers to identify potentially endangered languages:
+
+```{r}
+endangered <- languages_summary |>
+  filter(total_speakers < 10000)
+
+endangered_pct <- round(100 * nrow(endangered) / nrow(languages_summary), 1)
+
+size_distribution <- languages_summary |>
+  mutate(size_category = case_when(
+    total_speakers < 10000 ~ "Endangered (<10k)",
+    total_speakers < 100000 ~ "Small (10k-100k)",
+    total_speakers < 1000000 ~ "Medium (100k-1M)",
+    TRUE ~ "Large (>1M)"
+  )) |>
+  count(size_category) |>
+  mutate(
+    size_category = factor(size_category,
+                          levels = c("Endangered (<10k)",
+                                    "Small (10k-100k)",
+                                    "Medium (100k-1M)",
+                                    "Large (>1M)")),
+    pct = round(100 * n / sum(n), 1)
+  )
+
+ggplot(size_distribution, aes(x = size_category, y = n, fill = size_category)) +
+  geom_col() +
+  geom_text(aes(label = paste0(n, "\n(", pct, "%)")), vjust = -0.5, size = 4) +
+  scale_fill_viridis_d(option = "magma", direction = -1) +
+  labs(
+    title = "Distribution of African Languages by Speaker Population",
+    subtitle = "UNESCO considers languages with <10,000 speakers as potentially endangered",
+    x = "Language Size Category",
+    y = "Number of Languages"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  ylim(0, max(size_distribution$n) * 1.15)
+```
+
+**Key Finding**: `r nrow(endangered)` languages (`r endangered_pct`% of all languages) have fewer than 10,000 speakers, putting them at risk of extinction. The median language has only `r comma(median(languages_summary$total_speakers))` speakers.
+
+---
+
+## Geographic Diversity: Linguistically Rich Countries
+
+```{r}
+country_diversity <- africa |>
+  group_by(country) |>
+  summarize(
+    n_languages = n_distinct(language),
+    total_speakers = sum(native_speakers),
+    n_families = n_distinct(family),
+    .groups = "drop"
+  ) |>
+  arrange(desc(n_languages))
+
+top_countries <- country_diversity |>
+  slice_max(n_languages, n = 15)
+
+ggplot(top_countries, aes(x = reorder(country, n_languages), y = n_languages, fill = n_languages)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_viridis_c(option = "mako", direction = -1) +
+  labs(
+    title = "Most Linguistically Diverse African Countries",
+    subtitle = "Number of distinct languages per country",
+    x = NULL,
+    y = "Number of Languages",
+    fill = "Languages"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+**Key Finding**: Nigeria leads with `r max(country_diversity$n_languages)` languages, representing `r n_distinct(africa$family[africa$country == "Nigeria"])` different language families. This reflects the country's diverse ethnic composition and geography.
+
+---
+
+## Cross-Border Languages: Linguistic Bridges
+
+Languages that transcend national boundaries often serve as regional lingua francas and trade languages.
+
+```{r}
+cross_border <- africa |>
+  group_by(language) |>
+  summarize(
+    countries = n_distinct(country),
+    speakers = max(native_speakers),
+    country_list = paste(unique(country), collapse = ", ")
+  ) |>
+  filter(countries > 1) |>
+  arrange(desc(countries))
+
+cross_border |>
+  slice_max(countries, n = 10) |>
+  select(language, countries, speakers) |>
+  arrange(desc(countries))
+```
+
+**Key Finding:** Arabic is the most widespread language, spoken in 12 countries. Fulani spans 10 countries across West Africa, while Mooré and Soninke are each found in 8 nations.
+
+## Conclusion
+
+Africa's linguistic landscape reveals:
+
+-   **Extraordinary diversity** - Over 500 languages across 17 families
+-   **Uneven distribution** - Niger–Congo dominates, but significant representation from Afroasiatic and Nilo-Saharan families
+-   **Regional concentration** - Nigeria, Cameroon, and West African nations show the highest diversity
+-   **Cross-border connections** - Many languages unite people across colonial boundaries
+-   **Conservation concerns** - Nearly a quarter of languages have vulnerable speaker populations
+
+This rich linguistic heritage represents both a cultural treasure and a conservation challenge for the continent.

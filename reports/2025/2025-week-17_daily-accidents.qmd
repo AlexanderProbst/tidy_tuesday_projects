@@ -1,0 +1,70 @@
+---
+title: "Do More Fatal Accidents Happen on 4/20?"
+author: "Alexander Probst"
+date: "2025-04-22"
+categories: [2025, public-health, statistics]
+---
+
+```{r}
+#| message: false
+library(tidyverse)
+library(lubridate)
+library(broom)
+```
+
+```{r}
+#| message: false
+daily_accidents <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents.csv')
+daily_accidents_420 <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents_420.csv')
+```
+
+# Data Exploration
+
+## Summarizing Data
+
+```{r}
+glimpse(daily_accidents_420)
+```
+
+```{r}
+summary(daily_accidents_420)
+range(daily_accidents_420$date)
+table(daily_accidents_420$e420)
+```
+
+## Visualizing Data
+
+```{r}
+accidents_plot <- ggplot(data = daily_accidents_420, mapping = aes(x = date, y = fatalities_count)) +
+  geom_point(data = filter(daily_accidents_420, e420 == TRUE), color = "red", size = 2) +
+  labs(title = "Daily Fatalities Over Time",
+       x = "Date",
+       y = "Number of Fatalities") +
+  theme_minimal()
+
+accidents_plot
+```
+
+## Exploring Data
+
+```{r}
+daily_accidents_420 %>%
+  group_by(e420) %>%
+  summarise(
+    mean_fatalities = mean(fatalities_count, na.rm = TRUE),
+    median_fatalities = median(fatalities_count, na.rm = TRUE),
+    sd_fatalities = sd(fatalities_count, na.rm = TRUE),
+    n = n()
+  )
+```
+
+## Running Inferential Statistics
+
+```{r}
+daily_accidents_420 <- daily_accidents_420 |>
+  mutate(year = year(date))
+
+model1 <- lm(fatalities_count ~ e420 + year, data = daily_accidents_420)
+
+summary(model1)
+```

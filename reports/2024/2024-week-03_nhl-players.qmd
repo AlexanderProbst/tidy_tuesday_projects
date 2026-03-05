@@ -1,0 +1,279 @@
+---
+title: "The Relative Age Effect in NHL Hockey"
+author: "Alexander Probst"
+date: "2024-01-09"
+categories: [2024, sports, statistics]
+---
+
+## Introduction
+
+Are NHL players more likely to be born in certain months? Youth hockey in Canada and many other countries uses **January 1** as the age cutoff for divisions. This means a child born in January plays against children born up to 11 months later — giving them a significant size and developmental advantage at young ages. This early advantage snowballs into more ice time, better coaching, and ultimately a higher chance of going pro. This phenomenon is known as the **relative age effect** and was famously discussed in Malcolm Gladwell's *Outliers*.
+
+Let's see if the data backs this up.
+
+## Setup
+
+```{r}
+#| message: false
+library(tidyverse)
+library(scales)
+```
+
+## Load Data
+
+```{r}
+#| message: false
+tuesdata <- tidytuesdayR::tt_load('2024-01-09')
+
+canada_births <- tuesdata$canada_births_1991_2022
+nhl_births    <- tuesdata$nhl_player_births
+nhl_rosters   <- tuesdata$nhl_rosters
+nhl_teams     <- tuesdata$nhl_teams
+```
+
+## Quick Look at the Data
+
+```{r}
+glimpse(nhl_births)
+```
+
+```{r}
+glimpse(nhl_rosters)
+```
+
+## The Relative Age Effect: Birth Month Distribution
+
+If birth month didn't matter, we'd expect roughly equal numbers of NHL players born in each month (~8.3% each). Let's see the actual distribution.
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+
+birth_month_counts <- nhl_births |>
+  mutate(birth_month = factor(month.abb[birth_month], levels = month.abb)) |>
+  count(birth_month) |>
+  mutate(pct = n / sum(n) * 100)
+
+ggplot(birth_month_counts, aes(x = birth_month, y = pct)) +
+  geom_col(aes(fill = pct), show.legend = FALSE) +
+  geom_hline(yintercept = 100 / 12, linetype = "dashed", color = "red") +
+  scale_fill_gradient(low = "#1a3a5c", high = "#4fc3f7") +
+  annotate("text", x = 10, y = 100 / 12 + 0.4,
+           label = "Expected if no effect (8.3%)",
+           color = "red", size = 3.5) +
+  labs(
+    title = "NHL Player Births by Month",
+    subtitle = "Players born early in the year are significantly overrepresented",
+    x = NULL,
+    y = "Percentage of all NHL players (%)"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+## Quarterly Breakdown
+
+Grouping by quarter makes the effect even more striking.
+
+```{r}
+#| fig-width: 7
+#| fig-height: 5
+
+birth_quarter <- nhl_births |>
+  mutate(quarter = case_when(
+    birth_month %in% 1:3  ~ "Q1 (Jan-Mar)",
+    birth_month %in% 4:6  ~ "Q2 (Apr-Jun)",
+    birth_month %in% 7:9  ~ "Q3 (Jul-Sep)",
+    birth_month %in% 10:12 ~ "Q4 (Oct-Dec)"
+  )) |>
+  mutate(quarter = factor(quarter)) |>
+  count(quarter) |>
+  mutate(pct = n / sum(n) * 100)
+
+ggplot(birth_quarter, aes(x = quarter, y = pct)) +
+  geom_col(fill = c("#1a3a5c", "#2d6a9f", "#6baed6", "#bdd7e7")) +
+  geom_hline(yintercept = 25, linetype = "dashed", color = "red") +
+  geom_text(aes(label = paste0(round(pct, 1), "%")), vjust = -0.5, fontface = "bold") +
+  labs(
+    title = "NHL Players by Birth Quarter",
+    subtitle = "Q1 babies have a clear advantage over Q4",
+    x = NULL,
+    y = "Percentage (%)"
+  ) +
+  ylim(0, 35) +
+  theme_minimal(base_size = 14)
+```
+
+## Has the Effect Changed Over Time?
+
+As awareness of this bias has grown, has it diminished in recent decades?
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+era_data <- nhl_births |>
+  mutate(
+    era = case_when(
+      birth_year < 1950  ~ "Pre-1950",
+      birth_year < 1970  ~ "1950-1969",
+      birth_year < 1990  ~ "1970-1989",
+      birth_year >= 1990 ~ "1990+"
+    ),
+    era = factor(era, levels = c("Pre-1950", "1950-1969", "1970-1989", "1990+")),
+    birth_month = factor(month.abb[birth_month], levels = month.abb)
+  ) |>
+  count(era, birth_month) |>
+  group_by(era) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ungroup()
+
+ggplot(era_data, aes(x = birth_month, y = pct)) +
+  geom_col(aes(fill = pct), show.legend = FALSE) +
+  geom_hline(yintercept = 100 / 12, linetype = "dashed", color = "red", linewidth = 0.3) +
+  scale_fill_gradient(low = "#1a3a5c", high = "#4fc3f7") +
+  facet_wrap(~era) +
+  labs(
+    title = "Birth Month Distribution Across Eras",
+    subtitle = "The relative age effect is strongest in modern, more competitive eras",
+    x = NULL,
+    y = "Percentage (%)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Birth Country Trends
+
+How has the geographic makeup of the NHL changed over time?
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+top_countries <- nhl_births |>
+  count(birth_country, sort = TRUE) |>
+  slice_head(n = 6) |>
+  pull(birth_country)
+
+country_trend <- nhl_births |>
+  filter(birth_country %in% top_countries) |>
+  mutate(decade = (birth_year %/% 10) * 10) |>
+  count(decade, birth_country) |>
+  group_by(decade) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ungroup()
+
+ggplot(country_trend, aes(x = decade, y = pct, fill = birth_country)) +
+  geom_area(alpha = 0.8) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Where Are NHL Players Born?",
+    subtitle = "Share of players from the top 6 birth countries by decade",
+    x = "Birth Decade",
+    y = "Share (%)",
+    fill = "Country"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+## Canadian Births vs. NHL Player Births
+
+We can compare the general Canadian birth pattern to the NHL player birth pattern to see whether the NHL skew is truly beyond what normal seasonality would explain.
+
+```{r}
+#| fig-width: 9
+#| fig-height: 5
+
+canada_monthly <- canada_births |>
+  group_by(month) |>
+  summarise(births = sum(births), .groups = "drop") |>
+  mutate(
+    pct = births / sum(births) * 100,
+    month_name = factor(month.abb[month], levels = month.abb),
+    source = "Canadian Population"
+  )
+
+nhl_monthly <- nhl_births |>
+  filter(birth_country == "CA") |>
+  count(birth_month) |>
+  mutate(
+    pct = n / sum(n) * 100,
+    month_name = factor(month.abb[birth_month], levels = month.abb),
+    source = "Canadian NHL Players"
+  )
+
+comparison <- bind_rows(
+  canada_monthly |> select(month_name, pct, source),
+  nhl_monthly   |> select(month_name, pct, source)
+)
+
+ggplot(comparison, aes(x = month_name, y = pct, fill = source)) +
+  geom_col(position = "dodge") +
+  geom_hline(yintercept = 100 / 12, linetype = "dashed", color = "grey40") +
+  scale_fill_manual(values = c("Canadian Population" = "#bdd7e7",
+                                "Canadian NHL Players" = "#1a3a5c")) +
+  labs(
+    title = "Canadian Births vs. Canadian NHL Player Births by Month",
+    subtitle = "NHL skew far exceeds normal seasonal birth patterns",
+    x = NULL,
+    y = "Percentage (%)",
+    fill = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "top")
+```
+
+## Player Positions and the Relative Age Effect
+
+Does the effect vary by position? Larger positions (defensemen) might show a stronger effect than skill positions (forwards).
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+position_data <- nhl_rosters |>
+  distinct(player_id, .keep_all = TRUE) |>
+  filter(!is.na(birth_date)) |>
+  mutate(
+    birth_month = month(birth_date),
+    quarter = case_when(
+      birth_month %in% 1:3  ~ "Q1",
+      birth_month %in% 4:6  ~ "Q2",
+      birth_month %in% 7:9  ~ "Q3",
+      birth_month %in% 10:12 ~ "Q4"
+    ),
+    position_type = if_else(position_type == "G", "Goalie",
+                   if_else(position_type == "D", "Defenseman", "Forward"))
+  ) |>
+  count(position_type, quarter) |>
+  group_by(position_type) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ungroup()
+
+ggplot(position_data, aes(x = quarter, y = pct, fill = position_type)) +
+  geom_col(position = "dodge") +
+  geom_hline(yintercept = 25, linetype = "dashed", color = "red") +
+  scale_fill_manual(values = c("Forward" = "#1a3a5c",
+                                "Defenseman" = "#4fc3f7",
+                                "Goalie" = "#aaa")) +
+  labs(
+    title = "Relative Age Effect by Position",
+    subtitle = "Q1 vs Q4 advantage across forwards, defensemen, and goalies",
+    x = "Birth Quarter",
+    y = "Percentage (%)",
+    fill = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "top")
+```
+
+## Conclusion
+
+The data clearly shows the relative age effect in the NHL:
+
+-   Players born in **Q1 (Jan-Mar)** are significantly overrepresented compared to those born in **Q4 (Oct-Dec)**.
+-   The effect has **persisted and even strengthened** as youth hockey became more competitive and structured.
+-   The NHL skew far exceeds normal seasonal birth patterns in the Canadian population, confirming this is a selection effect, not a demographic one.
+-   The effect is present across all positions.
+
+This is a systemic bias baked into how youth sports are organized. Some leagues have experimented with alternative cutoff dates or birth-year groupings to mitigate it — but for now, being born in January remains a quiet advantage on the road to the NHL.

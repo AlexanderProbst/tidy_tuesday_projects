@@ -1,0 +1,28 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Tidy Tuesday Projects"
+  navbar:
+    left:
+      - text: "Home"
+        href: index.qmd
+      - text: "Reports"
+        menu:
+          - text: "2024"
+          - text: "Week 03: NHL Players & The Relative Age Effect"
+            href: reports/2024/2024-week-03_nhl-players.qmd
+          - text: "---"
+          - text: "2025"
+          - text: "Week 17: Daily Accidents (4/20)"
+            href: reports/2025/2025-week-17_daily-accidents.qmd
+          - text: "---"
+          - text: "2026"
+          - text: "Week 03: Languages of Africa"
+            href: reports/2026/2026-week-03_languages-of-africa.qmd
+
+format:
+  html:
+    theme: flatly
+    toc: true

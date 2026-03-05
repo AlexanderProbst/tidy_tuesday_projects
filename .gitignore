@@ -1,0 +1,12 @@
+.Rproj.user/
+.Rhistory
+.RData
+.Renviron
+.DS_Store
+*_cache/
+*_files/
+
+/.quarto/
+**/*.quarto_ipynb
+_site/
+*.knit.md

@@ -1,0 +1,25 @@
+---
+title: "Tidy Tuesday Projects"
+---
+
+Welcome! This site hosts my data analysis reports from the [TidyTuesday](https://github.com/rfordatascience/tidytuesday) project — a weekly social data project in R.
+
+## Reports
+
+### 2026
+
+| Week | Topic | Description |
+|------|-------|-------------|
+| 03 | [Languages of Africa](reports/2026/2026-week-03_languages-of-africa.qmd) | Analyzing linguistic diversity across 51 African countries and 502 languages |
+
+### 2025
+
+| Week | Topic | Description |
+|------|-------|-------------|
+| 17 | [Daily Accidents & 4/20](reports/2025/2025-week-17_daily-accidents.qmd) | Investigating whether fatal accidents increase on April 20th |
+
+### 2024
+
+| Week | Topic | Description |
+|------|-------|-------------|
+| 03 | [NHL Players & The Relative Age Effect](reports/2024/2024-week-03_nhl-players.qmd) | Exploring birth month bias in professional hockey |
