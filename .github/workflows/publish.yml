@@ -43,6 +43,11 @@ jobs:
             any::rnaturalearthdata
             any::sf
             any::patchwork
+            any::ggtext
+            any::glue
+            any::ggdist
+            any::sysfonts
+            any::showtext
 
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
