@@ -1,70 +1,494 @@
 ---
-title: "Do More Fatal Accidents Happen on 4/20?"
+title: "Does April 20th Cause More Fatal Car Crashes?"
 author: "Alexander Probst"
 date: "2025-04-22"
-categories: [2025, public-health, statistics]
+categories: [2025, traffic safety, statistics]
 ---
 
 ```{r}
-#| message: false
+#| include: false
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
 library(tidyverse)
-library(lubridate)
+library(scales)
+library(ggtext)
+library(glue)
+library(ggdist)
+library(patchwork)
 library(broom)
+library(sysfonts)
+library(showtext)
+
+# -- Typography --
+font_add_google("Outfit", "outfit")
+showtext_auto()
+
+# -- Palette: just two hues + neutrals --
+red    <- "#C44E52"
+blue   <- "#4C72B0"
+grey_l <- "#F0F0F0"
+grey_m <- "#C8C8C8"
+grey_d <- "#6C6C6C"
+ink    <- "#2D2D2D"
+bg     <- "#FAFAF8"
+
+# -- Theme --
+theme_set(
+  theme_minimal(base_size = 13, base_family = "outfit") +
+    theme(
+      plot.background    = element_rect(fill = bg, color = NA),
+      panel.background   = element_rect(fill = bg, color = NA),
+      plot.title         = element_markdown(face = "bold", size = 17, color = ink,
+                                            margin = margin(b = 2), lineheight = 1.1),
+      plot.subtitle      = element_markdown(size = 11, color = grey_d,
+                                            margin = margin(b = 16), lineheight = 1.3),
+      plot.caption       = element_markdown(size = 8, color = grey_m, hjust = 0,
+                                            margin = margin(t = 10)),
+      plot.title.position   = "plot",
+      plot.caption.position = "plot",
+      axis.title         = element_text(size = 10, color = grey_d),
+      axis.title.y       = element_text(margin = margin(r = 8)),
+      axis.title.x       = element_text(margin = margin(t = 8)),
+      axis.text          = element_text(size = 9, color = grey_d),
+      panel.grid.major.y = element_line(color = grey_l, linewidth = 0.45),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      legend.position    = "none",
+      plot.margin        = margin(18, 18, 12, 18),
+      strip.text         = element_text(face = "bold", size = 11, color = ink)
+    )
+)
 ```
 
 ```{r}
-#| message: false
 daily_accidents <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents.csv')
 daily_accidents_420 <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents_420.csv')
 ```
 
-# Data Exploration
+## Background
 
-## Summarizing Data
+In 2018, Harper and Palayew published a study in *JAMA Internal Medicine* examining whether April 20th --- widely associated with cannabis celebration --- sees an increase in fatal traffic accidents in the United States. Using data from the Fatality Analysis Reporting System (FARS), they reported a statistically significant increase in crash risk on 4/20 compared to control dates one week before and after.
 
-```{r}
-glimpse(daily_accidents_420)
-```
+This finding attracted considerable attention, but also scrutiny. Critics noted that the choice of control dates and analytical decisions could influence the result. This report revisits the question using the same FARS-derived dataset from TidyTuesday, exploring whether the "4/20 effect" holds up under visual and statistical examination.
 
-```{r}
-summary(daily_accidents_420)
-range(daily_accidents_420$date)
-table(daily_accidents_420$e420)
-```
+---
 
-## Visualizing Data
-
-```{r}
-accidents_plot <- ggplot(data = daily_accidents_420, mapping = aes(x = date, y = fatalities_count)) +
-  geom_point(data = filter(daily_accidents_420, e420 == TRUE), color = "red", size = 2) +
-  labs(title = "Daily Fatalities Over Time",
-       x = "Date",
-       y = "Number of Fatalities") +
-  theme_minimal()
-
-accidents_plot
-```
-
-## Exploring Data
-
-```{r}
-daily_accidents_420 %>%
-  group_by(e420) %>%
-  summarise(
-    mean_fatalities = mean(fatalities_count, na.rm = TRUE),
-    median_fatalities = median(fatalities_count, na.rm = TRUE),
-    sd_fatalities = sd(fatalities_count, na.rm = TRUE),
-    n = n()
-  )
-```
-
-## Running Inferential Statistics
+## Data Overview
 
 ```{r}
 daily_accidents_420 <- daily_accidents_420 |>
-  mutate(year = year(date))
+  mutate(
+    year  = year(date),
+    month = month(date),
+    wday  = wday(date, label = TRUE)
+  )
 
-model1 <- lm(fatalities_count ~ e420 + year, data = daily_accidents_420)
-
-summary(model1)
+year_range <- range(daily_accidents_420$year)
+n_days <- nrow(daily_accidents_420)
+n_420  <- sum(daily_accidents_420$e420 == TRUE, na.rm = TRUE)
 ```
+
+The dataset contains **`r comma(n_days)` daily observations** of fatal traffic accidents in the US, spanning **`r year_range[1]`--`r year_range[2]`**. Of these, **`r n_420` days** fall on April 20th (flagged as `e420 = TRUE`). The remaining days serve as comparison dates drawn from the same time window each year (one week before and after 4/20).
+
+| Metric | Value |
+|--------|-------|
+| Total daily observations | `r comma(n_days)` |
+| Date range | `r year_range[1]`--`r year_range[2]` |
+| April 20th observations | `r n_420` |
+| Mean daily fatalities | `r round(mean(daily_accidents_420$fatalities_count, na.rm = TRUE), 1)` |
+
+---
+
+## Visual Exploration
+
+### Daily Fatalities Over Time
+
+```{r}
+#| fig-cap: "Daily traffic fatalities over the study period with April 20th dates highlighted."
+#| fig-alt: "Scatter plot showing daily fatalities from 1992 to 2016 with 4/20 dates in red and control dates in grey."
+
+ctrl_pts <- filter(daily_accidents_420, is.na(e420) | e420 == FALSE)
+apr_pts  <- filter(daily_accidents_420, e420 == TRUE)
+
+ggplot(daily_accidents_420, aes(date, fatalities_count)) +
+  geom_point(data = ctrl_pts, color = grey_m, size = 1.4, alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE, color = blue, linewidth = 0.7, alpha = 0.5) +
+  geom_point(data = apr_pts, fill = red, color = "white", size = 3.2,
+             shape = 21, stroke = 0.7) +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.05))) +
+  labs(
+    title = "Daily Traffic Fatalities, 1992\u20132016",
+    subtitle = glue::glue(
+      "<span style='color:{red}'>**\u25CF April 20th**</span> dates shown against ",
+      "<span style='color:{grey_m}'>**\u25CF control dates**</span> (one week before & after)"
+    ),
+    x = NULL, y = NULL
+  )
+```
+
+The overall downward trend in fatalities across the study period is immediately apparent. April 20th dates appear scattered within the range of their neighboring control dates, with no obvious visual outliers.
+
+### Direct Comparison: 4/20 vs. Control Dates
+
+```{r}
+#| fig-cap: "Raincloud plot comparing fatality distributions on April 20th and control dates."
+#| fig-alt: "Half-violin density, boxplot, and jittered points comparing April 20th to control date fatalities."
+#| fig.height: 4.5
+
+comparison_data <- daily_accidents_420 |>
+  filter(!is.na(e420)) |>
+  mutate(group = if_else(e420, "April 20th", "Control Dates") |>
+           fct_rev())
+
+group_means <- comparison_data |>
+  group_by(group) |>
+  summarise(m = mean(fatalities_count), .groups = "drop")
+
+ggplot(comparison_data, aes(x = group, y = fatalities_count, fill = group, color = group)) +
+  # Half-violin (density)
+  stat_halfeye(
+    adjust = 0.6, width = 0.5, justification = -0.18,
+    .width = 0, point_colour = NA, slab_alpha = 0.35
+  ) +
+  # Boxplot
+  geom_boxplot(width = 0.12, outlier.shape = NA, alpha = 0.4, linewidth = 0.5) +
+  # Jittered raw points
+  geom_point(
+    position = position_jitter(seed = 42, width = 0.04),
+    size = 1.4, alpha = 0.3, shape = 16
+  ) +
+  # Mean labels (outside the plot area)
+  geom_text(
+    data = group_means, aes(x = group, y = m, label = paste0("mean = ", round(m, 1))),
+    nudge_x = 0.38, size = 3.4, fontface = "bold", family = "outfit"
+  ) +
+  scale_fill_manual(values  = c("April 20th" = red, "Control Dates" = blue)) +
+  scale_color_manual(values = c("April 20th" = red, "Control Dates" = blue)) +
+  coord_flip(clip = "off") +
+  labs(
+    title = "Fatality Distributions Overlap Substantially",
+    subtitle = glue::glue(
+      "<span style='color:{red}'>**April 20th**</span> vs. ",
+      "<span style='color:{blue}'>**control dates**</span> ",
+      "&mdash; density, box plot, and raw observations"
+    ),
+    x = NULL, y = "Fatalities"
+  ) +
+  theme(
+    axis.text.y  = element_text(face = "bold", size = 11),
+    plot.margin  = margin(18, 40, 12, 18)
+  )
+```
+
+```{r}
+summary_stats <- comparison_data |>
+  group_by(Group = group) |>
+  summarise(
+    Mean   = round(mean(fatalities_count, na.rm = TRUE), 1),
+    Median = median(fatalities_count, na.rm = TRUE),
+    SD     = round(sd(fatalities_count, na.rm = TRUE), 1),
+    N      = n(),
+    .groups = "drop"
+  )
+
+knitr::kable(summary_stats, caption = "Summary statistics by group")
+```
+
+### Year-by-Year Comparison
+
+How does April 20th compare to its control dates within each year? This dumbbell view controls for the secular trend.
+
+```{r}
+#| fig-cap: "Dumbbell plot showing April 20th fatality count versus the control-date mean for each year."
+#| fig-alt: "Horizontal dumbbell chart comparing April 20th fatality value to control mean per year."
+#| fig.height: 7
+
+yearly_ctrl <- comparison_data |>
+  filter(!e420) |>
+  group_by(year) |>
+  summarise(ctrl_mean = mean(fatalities_count), .groups = "drop")
+
+paired <- yearly_ctrl |>
+  left_join(
+    comparison_data |> filter(e420) |> select(year, apr_fat = fatalities_count),
+    by = "year"
+  ) |>
+  filter(!is.na(apr_fat)) |>
+  mutate(above = apr_fat > ctrl_mean)
+
+ggplot(paired, aes(y = factor(year))) +
+  # Connecting segment -- coloured by direction
+  geom_segment(
+    aes(x = ctrl_mean, xend = apr_fat, yend = factor(year),
+        color = above),
+    linewidth = 0.8
+  ) +
+  # Control mean point
+  geom_point(aes(x = ctrl_mean), fill = blue, color = "white",
+             shape = 21, size = 4.5, stroke = 0.9) +
+  # April 20th point
+  geom_point(aes(x = apr_fat), fill = red, color = "white",
+             shape = 21, size = 4.5, stroke = 0.9) +
+  scale_color_manual(values = c("TRUE" = red, "FALSE" = blue)) +
+  labs(
+    title = "April 20th vs. Control Mean — Year by Year",
+    subtitle = glue::glue(
+      "<span style='color:{red}'>**\u25CF April 20th**</span> connected to ",
+      "<span style='color:{blue}'>**\u25CF control mean**</span> — ",
+      "no consistent pattern of elevated fatalities"
+    ),
+    x = "Fatalities", y = NULL
+  ) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = grey_l, linewidth = 0.4),
+    axis.text.y = element_text(face = "bold")
+  )
+```
+
+### Day-of-Week Patterns
+
+Traffic fatalities follow strong weekly cycles --- weekends are deadlier. If April 20th disproportionately falls on certain weekdays, this could confound the comparison.
+
+```{r}
+#| fig-cap: "Average daily fatalities by day of the week, showing the weekend spike."
+#| fig-alt: "Bar chart of average fatalities by day of week with values labeled."
+#| fig.height: 4
+
+dow_data <- daily_accidents_420 |>
+  filter(!is.na(e420)) |>
+  group_by(wday) |>
+  summarise(m = mean(fatalities_count), .groups = "drop") |>
+  mutate(is_weekend = wday %in% c("Fri", "Sat", "Sun"))
+
+ggplot(dow_data, aes(wday, m, fill = is_weekend)) +
+  geom_col(width = 0.65, alpha = 0.85) +
+  geom_text(
+    aes(label = round(m, 0)),
+    vjust = -0.6, size = 3.8, fontface = "bold", family = "outfit", color = ink
+  ) +
+  scale_fill_manual(values = c("TRUE" = red, "FALSE" = blue)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(
+    title = "The Weekend Effect",
+    subtitle = glue::glue(
+      "<span style='color:{red}'>**Fri\u2013Sun**</span> show substantially higher ",
+      "fatality counts than <span style='color:{blue}'>**weekdays**</span> ",
+      "&mdash; a key confound to control for"
+    ),
+    x = NULL, y = "Mean fatalities"
+  )
+```
+
+---
+
+## Statistical Analysis
+
+### Model: Controlling for Year and Day of Week
+
+A simple comparison of means can be misleading if April 20th dates differ systematically from controls. The linear model below estimates the 4/20 effect while adjusting for both year and day of week.
+
+```{r}
+model_full <- lm(
+  fatalities_count ~ e420 + year + wday,
+  data = filter(daily_accidents_420, !is.na(e420))
+)
+
+tidy_model <- tidy(model_full, conf.int = TRUE) |>
+  mutate(across(where(is.numeric), \(x) round(x, 2)))
+
+effect_row <- tidy_model |> filter(term == "e420TRUE")
+glance_model <- glance(model_full)
+```
+
+```{r}
+knitr::kable(
+  tidy_model |>
+    select(Term = term, Estimate = estimate, SE = std.error,
+           `CI Low` = conf.low, `CI High` = conf.high, p = p.value),
+  caption = "Linear regression: fatalities ~ 4/20 + year + day-of-week"
+)
+```
+
+**Key result**: The estimated effect of April 20th is **`r effect_row$estimate` additional fatalities** (95% CI: `r effect_row$conf.low` to `r effect_row$conf.high`, p = `r effect_row$p.value`). The model explains **`r round(glance_model$r.squared * 100, 1)`%** of variance.
+
+```{r}
+#| fig-cap: "Day-of-week effect of model coefficients with 95% confidence intervals."
+#| fig-alt: "Two panel plot: left shows mean fatalities by weekday with CIs; right shows the April 20th model estimate with its confidence interval."
+#| fig.height: 4.5
+
+# Day-of-week observed means with 95% CI
+dow_emm <- daily_accidents_420 |>
+  filter(!is.na(e420)) |>
+  group_by(wday) |>
+  summarise(
+    emmean = mean(fatalities_count),
+    se     = sd(fatalities_count) / sqrt(n()),
+    .groups = "drop"
+  ) |>
+  mutate(
+    lower = emmean - 1.96 * se,
+    upper = emmean + 1.96 * se
+  )
+
+p_dow <- ggplot(dow_emm, aes(x = emmean, y = reorder(wday, emmean))) +
+  geom_linerange(aes(xmin = lower, xmax = upper),
+                 color = blue, linewidth = 2, alpha = 0.25) +
+  geom_linerange(aes(xmin = lower, xmax = upper),
+                 color = blue, linewidth = 0.7) +
+  geom_point(fill = blue, color = "white", shape = 21, size = 4, stroke = 0.9) +
+  labs(
+    title = "Day-of-Week Effect",
+    subtitle = "Mean fatalities \u00b1 95% CI per weekday",
+    x = "Mean daily fatalities", y = NULL
+  ) +
+  theme(panel.grid.major.y = element_blank())
+
+# April 20th adjusted effect in isolation
+p_420 <- effect_row |>
+  mutate(label = "April 20th\nvs. controls") |>
+  ggplot(aes(x = estimate, y = label)) +
+  geom_vline(xintercept = 0, color = grey_m, linewidth = 0.7, linetype = "dashed") +
+  geom_linerange(aes(xmin = conf.low, xmax = conf.high),
+                 color = red, linewidth = 2, alpha = 0.25) +
+  geom_linerange(aes(xmin = conf.low, xmax = conf.high),
+                 color = red, linewidth = 0.8) +
+  geom_point(fill = red, color = "white", shape = 21, size = 5, stroke = 1) +
+  labs(
+    title = "April 20th Effect (Adjusted)",
+    subtitle = glue::glue(
+      "Estimate: **{effect_row$estimate}** fatalities ",
+      "(95% CI: {effect_row$conf.low} to {effect_row$conf.high})"
+    ),
+    x = "Additional fatalities vs. controls", y = NULL
+  ) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.y = element_text(face = "bold", size = 11)
+  )
+
+p_dow + p_420 + plot_layout(widths = c(1.4, 1))
+```
+
+### Zooming Out: the Full FARS Dataset
+
+The comparison dataset only includes dates near April 20th. The broader `daily_accidents` dataset covers every day of the year. Does April 20th stand out among *all* calendar dates?
+
+```{r}
+daily_full <- daily_accidents |>
+  mutate(
+    year   = year(date),
+    month  = month(date),
+    wday   = wday(date, label = TRUE),
+    is_420 = month(date) == 4 & day(date) == 20
+  )
+
+full_summary <- daily_full |>
+  group_by(is_420) |>
+  summarise(
+    Mean = round(mean(fatalities_count), 1),
+    Median = median(fatalities_count),
+    SD = round(sd(fatalities_count), 1),
+    N = n(), .groups = "drop"
+  ) |>
+  mutate(Group = if_else(is_420, "April 20th", "All Other Days")) |>
+  select(Group, Mean, Median, SD, N)
+
+knitr::kable(full_summary, caption = "Fatalities on April 20th vs. all other days (full FARS dataset)")
+```
+
+```{r}
+#| fig-cap: "Average fatalities for each of the 366 possible calendar dates, with April 20th highlighted. The seasonal curve peaks in summer."
+#| fig-alt: "Scatter plot of average fatalities by calendar date with April 20th highlighted and a seasonal trend line."
+#| fig.height: 5
+
+daily_by_date <- daily_full |>
+  mutate(month_day = format(date, "%m-%d")) |>
+  group_by(month_day) |>
+  summarise(
+    m = mean(fatalities_count),
+    is_420 = any(is_420),
+    .groups = "drop"
+  ) |>
+  mutate(fake_date = as.Date(paste0("2000-", month_day)))
+
+apr20_pt   <- filter(daily_by_date, is_420)
+apr20_rank <- sum(daily_by_date$m > apr20_pt$m) + 1
+
+ggplot(daily_by_date, aes(fake_date, m)) +
+  geom_point(data = filter(daily_by_date, !is_420),
+             color = grey_m, size = 1.2, alpha = 0.55) +
+  geom_smooth(method = "loess", span = 0.15, se = FALSE,
+              color = blue, linewidth = 0.6, alpha = 0.45) +
+  geom_point(data = apr20_pt, fill = red, color = "white",
+             shape = 21, size = 5, stroke = 1) +
+  # Direct label
+  annotate(
+    "text", x = apr20_pt$fake_date + 22, y = apr20_pt$m + 1,
+    label = paste0("April 20th\n(rank ", apr20_rank, " of ", nrow(daily_by_date), ")"),
+    hjust = 0, family = "outfit", fontface = "bold", size = 3.5, color = red,
+    lineheight = 0.9
+  ) +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month",
+               expand = expansion(add = c(5, 30))) +
+  labs(
+    title = "Where Does April 20th Rank Among All Calendar Dates?",
+    subtitle = glue::glue(
+      "Each point is one calendar date\u2019s average fatalities across all years &mdash; ",
+      "<span style='color:{red}'>**April 20th**</span> is unremarkable"
+    ),
+    x = NULL, y = "Mean daily fatalities",
+    caption = "Source: FARS (Fatality Analysis Reporting System) via TidyTuesday"
+  ) +
+  theme(panel.grid.major.x = element_line(color = grey_l, linewidth = 0.35,
+                                           linetype = "dotted"))
+```
+
+### Seasonal Context
+
+```{r}
+#| fig-cap: "Monthly fatality distributions with April highlighted, showing the summer peak."
+#| fig-alt: "Box plots of monthly fatality distributions with April highlighted in red."
+#| fig.height: 4.5
+
+monthly_data <- daily_full |>
+  mutate(
+    month_label = month(date, label = TRUE, abbr = TRUE),
+    is_april    = month == 4
+  )
+
+ggplot(monthly_data, aes(month_label, fatalities_count, fill = is_april)) +
+  geom_boxplot(
+    width = 0.6, alpha = 0.5, linewidth = 0.4,
+    outlier.size = 0.5, outlier.alpha = 0.15, outlier.color = grey_m
+  ) +
+  scale_fill_manual(values = c("FALSE" = blue, "TRUE" = red)) +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.05))) +
+  labs(
+    title = "Seasonal Pattern in Daily Fatalities",
+    subtitle = glue::glue(
+      "<span style='color:{red}'>**April**</span> sits in the spring transition ",
+      "between winter lows and <span style='color:{blue}'>**summer peaks**</span>"
+    ),
+    x = NULL, y = "Daily fatalities"
+  )
+```
+
+---
+
+## Conclusion
+
+```{r}
+sig <- effect_row$p.value < 0.05
+direction <- if_else(effect_row$estimate > 0, "higher", "lower")
+```
+
+`r if(sig) paste0("The analysis finds a statistically significant effect: April 20th is associated with **", effect_row$estimate, " ", direction, " fatalities** compared to nearby control dates, after adjusting for year trends and day-of-week effects (p = ", effect_row$p.value, "). This is directionally consistent with the original Harper & Palayew finding.") else paste0("After controlling for year trends and day-of-week effects, the estimated 4/20 effect is ", effect_row$estimate, " fatalities (p = ", effect_row$p.value, "), which is **not statistically significant** at the conventional 0.05 threshold. The confidence interval spans from ", effect_row$conf.low, " to ", effect_row$conf.high, ", meaning we cannot rule out either a modest increase or no effect at all.")`
+
+However, several caveats are worth noting:
+
+- **Small sample of 4/20 dates**: With only `r n_420` April 20th observations, statistical power is limited.
+- **Control date selection matters**: The original study's choice of control dates (one week before/after) has been debated. Different control strategies can shift the result.
+- **Correlation vs. causation**: Even a significant association would not prove that cannabis use caused additional crashes --- other April 20th-specific factors (spring weather, events) could contribute.
+- **Secular trend**: The strong downward trend in fatalities over the study period highlights how important it is to adjust for year when making comparisons.
+
+The question of whether 4/20 poses a genuine traffic safety risk remains open. The effect, if real, is small relative to well-established risk factors like weekends, holidays, and weather --- factors that any traffic safety intervention should prioritize first.
