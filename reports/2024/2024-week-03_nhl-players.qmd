@@ -126,23 +126,28 @@ birth_quarter <- nhl_births |>
     birth_month %in% 7:9  ~ "Q3 (Jul\u2013Sep)",
     birth_month %in% 10:12 ~ "Q4 (Oct\u2013Dec)"
   )) |>
-  mutate(quarter = factor(quarter)) |>
-  count(quarter) |>
+  mutate(
+    quarter = factor(quarter),
+    is_q1 = quarter == "Q1 (Jan\u2013Mar)"
+  ) |>
+  count(quarter, is_q1) |>
   mutate(pct = n / sum(n) * 100)
 
-quarter_fills <- c(navy, "#2d6a9f", "#6baed6", ice)
-
-ggplot(birth_quarter, aes(x = quarter, y = pct)) +
-  geom_col(fill = quarter_fills, width = 0.65, alpha = 0.85) +
+ggplot(birth_quarter, aes(x = quarter, y = pct, fill = is_q1)) +
+  geom_col(show.legend = FALSE, width = 0.65, alpha = 0.85) +
   geom_hline(yintercept = 25, linetype = "dashed", color = grey_d, linewidth = 0.5) +
   geom_text(
     aes(label = paste0(round(pct, 1), "%")),
     vjust = -0.5, size = 3.8, fontface = "bold", family = "outfit", color = ink
   ) +
+  scale_fill_manual(values = c("TRUE" = navy, "FALSE" = ice)) +
   scale_y_continuous(limits = c(0, 35), expand = expansion(mult = c(0, 0.05))) +
   labs(
     title = "NHL Players by Birth Quarter",
-    subtitle = "Q1 babies have a clear advantage over Q4 &mdash; the relative age effect in action",
+    subtitle = glue(
+      "<span style='color:{navy}'>**Q1**</span> babies have a clear advantage over ",
+      "<span style='color:{ice}'>**Q2\u2013Q4**</span> &mdash; the relative age effect in action"
+    ),
     x = NULL, y = "Percentage (%)"
   )
 ```
@@ -174,14 +179,13 @@ era_data <- nhl_births |>
   ungroup()
 
 ggplot(era_data, aes(x = birth_month, y = pct)) +
-  geom_col(aes(fill = pct), show.legend = FALSE, width = 0.7) +
+  geom_col(fill = navy, show.legend = FALSE, width = 0.7, alpha = 0.85) +
   geom_hline(yintercept = 100 / 12, linetype = "dashed", color = grey_d, linewidth = 0.3) +
-  scale_fill_gradient(low = ice, high = navy) +
   facet_wrap(~era) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
   labs(
-    title = "Birth Month Distribution Across Eras",
-    subtitle = "The relative age effect is strongest in modern, more competitive eras",
+    title = "The Relative Age Effect Has Strengthened Over Time",
+    subtitle = "Birth month distribution by era &mdash; the January skew grows as youth hockey becomes more competitive",
     x = NULL, y = "Percentage (%)"
   ) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
@@ -210,14 +214,23 @@ country_trend <- nhl_births |>
   mutate(pct = n / sum(n) * 100) |>
   ungroup()
 
+country_labels <- c(CAN = "Canada", USA = "USA", SWE = "Sweden",
+                     RUS = "Russia", CZE = "Czechia", FIN = "Finland")
+country_trend <- country_trend |>
+  mutate(birth_country = factor(birth_country, levels = names(country_labels),
+                                labels = country_labels))
+
+country_palette <- c("Canada" = navy, "USA" = sky, "Sweden" = "#E8A838",
+                      "Russia" = "#C44E52", "Czechia" = "#8FBC8F", "Finland" = ice)
+
 ggplot(country_trend, aes(x = decade, y = pct, fill = birth_country)) +
   geom_area(alpha = 0.8) +
-  scale_fill_brewer(palette = "Set2") +
+  scale_fill_manual(values = country_palette) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.02))) +
   labs(
-    title = "Where Are NHL Players Born?",
+    title = "Canada\u2019s Dominance Has Declined as the NHL Internationalised",
     subtitle = "Share of players from the top 6 birth countries by decade",
-    x = "Birth Decade", y = "Share (%)", fill = "Country"
+    x = "Birth Decade", y = "Share (%)", fill = NULL
   ) +
   theme(legend.position = "top")
 ```
@@ -243,7 +256,7 @@ canada_monthly <- canada_births |>
   )
 
 nhl_monthly <- nhl_births |>
-  filter(birth_country == "CA") |>
+  filter(birth_country == "CAN") |>
   count(birth_month) |>
   mutate(
     pct = n / sum(n) * 100,
@@ -263,7 +276,7 @@ ggplot(comparison, aes(x = month_name, y = pct, fill = source)) +
                                 "Canadian NHL Players" = navy)) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
   labs(
-    title = "Canadian Births vs. Canadian NHL Player Births by Month",
+    title = "NHL Birth Skew Far Exceeds Seasonal Patterns",
     subtitle = glue(
       "<span style='color:{navy}'>**NHL players**</span> show a far stronger January skew than the ",
       "<span style='color:{ice}'>**general population**</span> &mdash; this is selection, not demographics"
@@ -294,8 +307,11 @@ position_data <- nhl_rosters |>
       birth_month %in% 7:9  ~ "Q3",
       birth_month %in% 10:12 ~ "Q4"
     ),
-    position_type = if_else(position_type == "G", "Goalie",
-                   if_else(position_type == "D", "Defenseman", "Forward"))
+    position_type = case_when(
+      position_type == "goalies"    ~ "Goalie",
+      position_type == "defensemen" ~ "Defenseman",
+      .default = "Forward"
+    )
   ) |>
   count(position_type, quarter) |>
   group_by(position_type) |>
@@ -305,7 +321,7 @@ position_data <- nhl_rosters |>
 ggplot(position_data, aes(x = quarter, y = pct, fill = position_type)) +
   geom_col(position = "dodge", width = 0.7, alpha = 0.85) +
   geom_hline(yintercept = 25, linetype = "dashed", color = grey_d, linewidth = 0.4) +
-  scale_fill_manual(values = c("Forward" = navy, "Defenseman" = sky, "Goalie" = grey_m)) +
+  scale_fill_manual(values = c("Forward" = navy, "Defenseman" = sky, "Goalie" = "#999999")) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
   labs(
     title = "Relative Age Effect by Position",
