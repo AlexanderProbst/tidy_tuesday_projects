@@ -10,27 +10,84 @@ categories: [2026, linguistics, geography]
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6)
 library(tidyverse)
 library(scales)
-library(viridis)
+library(ggtext)
+library(glue)
+library(sysfonts)
+library(showtext)
+library(patchwork)
 library(rnaturalearth)
 library(sf)
 
-africa <- read_csv(here::here("data", "2026", "africa_data.csv"))
+# -- Typography --
+font_add_google("Outfit", "outfit")
+showtext_auto()
+
+# -- Palette --
+navy   <- "#1a3a5c"
+teal   <- "#2a9d8f"
+amber  <- "#e9c46a"
+coral  <- "#e76f51"
+sky    <- "#4fc3f7"
+grey_l <- "#F0F0F0"
+grey_m <- "#C8C8C8"
+grey_d <- "#6C6C6C"
+ink    <- "#2D2D2D"
+bg     <- "#FAFAF8"
+
+# -- Theme --
+theme_set(
+  theme_minimal(base_size = 13, base_family = "outfit") +
+    theme(
+      plot.background       = element_rect(fill = bg, color = NA),
+      panel.background      = element_rect(fill = bg, color = NA),
+      plot.title            = element_markdown(face = "bold", size = 17, color = ink,
+                                               margin = margin(b = 2), lineheight = 1.1),
+      plot.subtitle         = element_markdown(size = 11, color = grey_d,
+                                               margin = margin(b = 16), lineheight = 1.3),
+      plot.caption          = element_markdown(size = 8, color = grey_m, hjust = 0,
+                                               margin = margin(t = 10)),
+      plot.title.position   = "plot",
+      plot.caption.position = "plot",
+      axis.title            = element_text(size = 10, color = grey_d),
+      axis.title.y          = element_text(margin = margin(r = 8)),
+      axis.title.x          = element_text(margin = margin(t = 8)),
+      axis.text             = element_text(size = 9, color = grey_d),
+      panel.grid.major.y    = element_line(color = grey_l, linewidth = 0.45),
+      panel.grid.major.x    = element_blank(),
+      panel.grid.minor      = element_blank(),
+      legend.position       = "none",
+      plot.margin           = margin(18, 18, 12, 18),
+      strip.text            = element_text(face = "bold", size = 11, color = ink)
+    )
+)
+```
+
+```{r}
+africa_raw <- read_csv(here::here("data", "2026", "africa_data.csv"))
+
+# -- Data cleaning --
+# The raw data has family-level quality issues from Wikipedia scraping:
+# - "Afroasiatic" and "Afro-Asiatic" are duplicates
+# - "English", "French", "Portuguese", "Arabic-based", "Kongo-based" are creoles/pidgins
+# - "Language" is a parsing artefact (one row: Shabo)
+africa <- africa_raw |>
+  mutate(family = case_when(
+    family == "Afro-Asiatic" ~ "Afroasiatic",
+    family %in% c("Arabic-based", "English", "French",
+                   "Portuguese", "Kongo-based") ~ "Creole/Pidgin",
+    family == "Language" ~ NA_character_,
+    TRUE ~ family
+  )) |>
+  filter(!is.na(family))
 ```
 
 ## Executive Summary
 
-This report analyzes linguistic diversity across Africa using TidyTuesday data on African languages. The dataset contains **796 language-country observations** representing **502 unique languages** spoken across **51 African countries**, grouped into **17 language families**.
+This report analyses linguistic diversity across Africa using [TidyTuesday data](https://github.com/rfordatascience/tidytuesday/blob/main/data/2026/2026-01-14/readme.md) scraped from Wikipedia's *Languages of Africa* page. The dataset contains **`r comma(nrow(africa))` language--country observations** representing **`r n_distinct(africa$language)` unique languages** spoken across **`r n_distinct(africa$country)` African countries**, grouped into **`r n_distinct(africa$family)` language families** (after consolidating duplicates and grouping creoles).
 
-**Note on Data Structure**: Each row represents a language spoken in a specific country. Languages spoken in multiple countries appear multiple times in the dataset, which allows us to analyze cross-border linguistic connections.
+**Note on Data Structure**: Each row represents a language spoken in a specific country. Languages spoken in multiple countries appear multiple times, which allows us to analyse cross-border linguistic connections.
 
-**Note on Speaker Counts**: The `native_speakers` column captures **first-language (L1) speakers only**. This significantly underrepresents languages that serve as lingua francas — for example, Swahili has ~5.3 million native speakers in this dataset, but is estimated to have 100–150 million total speakers when including second-language (L2) use. Similarly, Arabic and other trade/regional languages will appear smaller than their true communicative reach. All speaker counts in this report should be interpreted with this caveat in mind.
-
-Key findings include:
-
-- **Extreme linguistic diversity**: Niger-Congo family dominates with 279 languages
-- **Language endangerment**: 23% of languages have fewer than 10,000 speakers (UNESCO endangerment threshold)
-- **Speaker concentration**: The top 10 languages account for 58% of all native speakers
-- **Cross-border connections**: 155 languages (31%) are spoken across multiple countries, with Arabic spanning 12 nations
+**Note on Speaker Counts**: The `native_speakers` column captures **first-language (L1) speakers only**. This significantly underrepresents languages that serve as lingua francas --- for example, Swahili has ~5.3 million native speakers in this dataset, but is estimated to have 100--150 million total speakers when including second-language (L2) use. Similarly, Arabic and other trade/regional languages will appear smaller than their true communicative reach. All speaker counts in this report should be interpreted with this caveat in mind.
 
 ---
 
@@ -49,24 +106,34 @@ total_languages <- n_distinct(africa$language)
 total_families <- n_distinct(africa$family)
 total_countries <- n_distinct(africa$country)
 total_speakers <- sum(languages_summary$total_speakers)
+
+cross_border <- africa |>
+  group_by(language) |>
+  summarize(countries = n_distinct(country), .groups = "drop") |>
+  filter(countries > 1)
+n_cross <- nrow(cross_border)
 ```
 
 | Metric | Value |
 |--------|-------|
-| Language-country pairs | `r nrow(africa)` |
+| Language--country pairs | `r comma(nrow(africa))` |
 | Unique languages | `r total_languages` |
 | Language families | `r total_families` |
 | Countries | `r total_countries` |
 | Total native speakers | `r comma(total_speakers)` |
+| Cross-border languages | `r n_cross` (`r round(100 * n_cross / total_languages, 0)`%) |
 
 ---
 
-## Language Families: The Niger-Congo Dominance
+## Language Families: Niger--Congo Dominates in Diversity, Afroasiatic in Reach
 
-The Niger-Congo family exhibits extraordinary diversity, containing more than half of all African languages in this dataset.
+The Niger--Congo family contains more than half of all African languages in this dataset, yet Afroasiatic --- with far fewer languages --- rivals it in total speaker count, driven largely by Arabic.
 
 ```{r}
+#| fig-cap: "Language count and total speakers by family (families with 4+ languages). Niger-Congo dominates diversity while Afroasiatic leads in speaker reach."
+#| fig-alt: "Side-by-side bar charts comparing number of languages and total speakers per language family."
 #| fig.height: 8
+
 family_summary <- languages_summary |>
   group_by(family) |>
   summarize(
@@ -80,84 +147,90 @@ family_plot_data <- family_summary |>
   filter(n_languages >= 4) |>
   mutate(family_ordered = reorder(family, n_languages))
 
-p1 <- ggplot(family_plot_data, aes(x = family_ordered, y = n_languages, fill = n_languages)) +
-  geom_col() +
+p1 <- ggplot(family_plot_data, aes(x = family_ordered, y = n_languages)) +
+  geom_col(fill = navy, width = 0.65, alpha = 0.85) +
+  geom_text(aes(label = n_languages), hjust = -0.3, size = 3.5,
+            fontface = "bold", family = "outfit", color = ink) +
   coord_flip() +
-  scale_fill_viridis_c(option = "plasma", begin = 0.3, end = 0.7) +
-  labs(
-    title = "Number of Languages per Family",
-    x = NULL,
-    y = "Number of Languages"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none")
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Languages per Family", x = NULL, y = "Languages")
 
-p2 <- ggplot(family_plot_data, aes(x = family_ordered, y = total_speakers, fill = total_speakers)) +
-  geom_col() +
+p2 <- ggplot(family_plot_data, aes(x = family_ordered, y = total_speakers)) +
+  geom_col(fill = teal, width = 0.65, alpha = 0.85) +
   coord_flip() +
-  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
-  scale_fill_viridis_c(option = "plasma", begin = 0.3, end = 0.7) +
-  labs(
-    title = "Total Native Speakers per Family",
-    x = NULL,
-    y = "Total Speakers"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none")
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale()),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(title = "Total Native Speakers per Family", x = NULL, y = "Speakers (L1)")
 
-library(patchwork)
 p1 + p2 + plot_annotation(
-  title = "Language Families: Diversity vs. Speaker Population",
-  subtitle = "Families with 4+ languages — note the different scales"
+  title = glue("Niger\u2013Congo Leads in Diversity, <span style='color:{teal}'>Afroasiatic</span> in Speaker Reach"),
+  subtitle = "Families with 4+ languages \u2014 note the different x-axis scales",
+  theme = theme(
+    plot.title = element_markdown(face = "bold", size = 17, color = ink,
+                                   margin = margin(b = 2), lineheight = 1.1),
+    plot.subtitle = element_markdown(size = 11, color = grey_d,
+                                      margin = margin(b = 12), lineheight = 1.3)
+  )
 )
 ```
-
-**Key Finding**: Niger-Congo has `r family_summary$n_languages[1]` languages but Afro-Asiatic (with only `r family_summary$n_languages[family_summary$family == "Afro-Asiatic"]` languages) has `r comma(family_summary$total_speakers[family_summary$family == "Afro-Asiatic"])` speakers, driven largely by Arabic.
 
 ---
 
 ## Top 10 Languages by Native (L1) Speakers
 
 ```{r}
+#| fig-cap: "Top 10 African languages by native speaker count, coloured by language family."
+#| fig-alt: "Horizontal bar chart of top 10 languages by native speakers, with Arabic leading at 150M."
+#| fig.height: 5
+
 top_languages <- languages_summary |>
   slice_max(total_speakers, n = 10)
 
 top10_speakers <- sum(top_languages$total_speakers)
 concentration_pct <- round(100 * top10_speakers / total_speakers, 1)
 
-ggplot(top_languages, aes(x = reorder(language, total_speakers), y = total_speakers, fill = total_speakers)) +
-  geom_col() +
+family_colors <- c("Afroasiatic" = navy, "Niger\u2013Congo" = teal,
+                    "Austronesian" = amber)
+
+ggplot(top_languages, aes(x = reorder(language, total_speakers), y = total_speakers,
+                           fill = family)) +
+  geom_col(width = 0.65, alpha = 0.85) +
+  geom_text(aes(label = paste0(round(total_speakers / 1e6, 0), "M")),
+            hjust = -0.15, size = 3.5, fontface = "bold", family = "outfit", color = ink) +
   coord_flip() +
-  scale_y_continuous(labels = comma) +
-  scale_fill_viridis_c(option = "viridis", direction = -1) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale()),
+                     expand = expansion(mult = c(0, 0.15))) +
+  scale_fill_manual(values = family_colors) +
   labs(
-    title = "Top 10 African Languages by Native (L1) Speakers",
-    subtitle = paste0("These languages represent ", concentration_pct, "% of all native speakers in the dataset"),
-    x = NULL,
-    y = "Native Speakers (L1 only)",
-    fill = "Speakers"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none")
+    title = glue("Arabic Dominates L1 Counts \u2014 Top 10 Hold {concentration_pct}% of All Speakers"),
+    subtitle = glue(
+      "Coloured by family: <span style='color:{navy}'>**Afroasiatic**</span>, ",
+      "<span style='color:{teal}'>**Niger\u2013Congo**</span>, ",
+      "<span style='color:{amber}'>**Austronesian**</span>"
+    ),
+    x = NULL, y = "Native Speakers (L1 only)"
+  )
 ```
 
 ::: {.callout-important}
 ## L1 vs. Total Speakers: A Critical Distinction
 
-This chart ranks languages by **native (L1) speakers only**, which can be misleading. Swahili, for instance, ranks modestly here with ~5.3M L1 speakers, but is widely considered **the most spoken language in Africa** when including second-language (L2) speakers, with estimates of **100–200 million total speakers**. Similarly, Hausa and Amharic have substantial L2 communities not captured here.
+This chart ranks languages by **native (L1) speakers only**, which can be misleading. Swahili, for instance, ranks modestly here with ~5.3M L1 speakers, but is widely considered **the most spoken language in Africa** when including second-language (L2) speakers, with estimates of **100--200 million total speakers**. Similarly, Hausa and Amharic have substantial L2 communities not captured here.
 
-A ranking by total speakers (L1 + L2) would look very different — Swahili would likely top the list, and languages like Arabic and Hausa would also shift significantly.
+A ranking by total speakers (L1 + L2) would look very different --- Swahili would likely top the list, and languages like Arabic and Hausa would also shift significantly.
 :::
-
-**Key Finding**: Arabic dominates L1 counts with 150 million native speakers, followed by Hausa (85M). The top 10 languages account for **`r concentration_pct`%** of all L1 speakers, showing significant concentration despite high linguistic diversity.
 
 ---
 
-## Endangered Languages Crisis
+## Nearly a Quarter of Languages May Be Endangered
 
 Using UNESCO's threshold of 10,000 speakers to identify potentially endangered languages:
 
 ```{r}
+#| fig-cap: "Distribution of languages by speaker population size. Nearly a quarter fall below the 10,000-speaker endangerment threshold."
+#| fig-alt: "Bar chart showing four size categories: Endangered, Small, Medium, and Large, with Endangered being the second-largest group."
+#| fig.height: 5
+
 endangered <- languages_summary |>
   filter(total_speakers < 10000)
 
@@ -166,44 +239,44 @@ endangered_pct <- round(100 * nrow(endangered) / nrow(languages_summary), 1)
 size_distribution <- languages_summary |>
   mutate(size_category = case_when(
     total_speakers < 10000 ~ "Endangered (<10k)",
-    total_speakers < 100000 ~ "Small (10k-100k)",
-    total_speakers < 1000000 ~ "Medium (100k-1M)",
+    total_speakers < 100000 ~ "Small (10k\u2013100k)",
+    total_speakers < 1000000 ~ "Medium (100k\u20131M)",
     TRUE ~ "Large (>1M)"
   )) |>
   count(size_category) |>
   mutate(
     size_category = factor(size_category,
                           levels = c("Endangered (<10k)",
-                                    "Small (10k-100k)",
-                                    "Medium (100k-1M)",
+                                    "Small (10k\u2013100k)",
+                                    "Medium (100k\u20131M)",
                                     "Large (>1M)")),
-    pct = round(100 * n / sum(n), 1)
+    pct = round(100 * n / sum(n), 1),
+    is_endangered = size_category == "Endangered (<10k)"
   )
 
-ggplot(size_distribution, aes(x = size_category, y = n, fill = size_category)) +
-  geom_col() +
-  geom_text(aes(label = paste0(n, "\n(", pct, "%)")), vjust = -0.5, size = 4) +
-  scale_fill_viridis_d(option = "magma", direction = -1) +
+ggplot(size_distribution, aes(x = size_category, y = n, fill = is_endangered)) +
+  geom_col(width = 0.65, alpha = 0.85) +
+  geom_text(aes(label = paste0(n, " (", pct, "%)")),
+            vjust = -0.5, size = 3.8, fontface = "bold", family = "outfit", color = ink) +
+  scale_fill_manual(values = c("TRUE" = coral, "FALSE" = navy)) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
   labs(
-    title = "Distribution of African Languages by Speaker Population",
-    subtitle = "UNESCO considers languages with <10,000 speakers as potentially endangered",
-    x = "Language Size Category",
-    y = "Number of Languages"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "none"
-  ) +
-  ylim(0, max(size_distribution$n) * 1.15)
+    title = glue("{nrow(endangered)} Languages ({endangered_pct}%) Fall Below the Endangerment Threshold"),
+    subtitle = glue(
+      "<span style='color:{coral}'>**Endangered**</span> languages (&lt;10,000 speakers) vs. ",
+      "<span style='color:{navy}'>**other size classes**</span> \u2014 median language has only {comma(median(languages_summary$total_speakers))} speakers"
+    ),
+    x = NULL, y = "Number of Languages"
+  )
 ```
-
-**Key Finding**: `r nrow(endangered)` languages (`r endangered_pct`% of all languages) have fewer than 10,000 speakers, putting them at risk of extinction. The median language has only `r comma(median(languages_summary$total_speakers))` speakers.
 
 ### Endangerment by Language Family
 
 ```{r}
-#| fig.height: 7
+#| fig-cap: "Percentage of languages below the 10,000-speaker threshold by family (families with 3+ languages)."
+#| fig-alt: "Horizontal bar chart showing endangerment rates by language family."
+#| fig.height: 6
+
 endangered_by_family <- languages_summary |>
   mutate(endangered = total_speakers < 10000) |>
   group_by(family) |>
@@ -216,33 +289,30 @@ endangered_by_family <- languages_summary |>
   filter(total >= 3) |>
   arrange(desc(pct_endangered))
 
-ggplot(endangered_by_family, aes(x = reorder(family, pct_endangered), y = pct_endangered,
-                                  fill = pct_endangered)) +
-  geom_col() +
-  geom_text(aes(label = paste0(n_endangered, "/", total)), hjust = -0.2, size = 3.5) +
+ggplot(endangered_by_family, aes(x = reorder(family, pct_endangered), y = pct_endangered)) +
+  geom_col(fill = coral, width = 0.65, alpha = 0.85) +
+  geom_text(aes(label = paste0(n_endangered, "/", total)),
+            hjust = -0.2, size = 3.5, fontface = "bold", family = "outfit", color = ink) +
   coord_flip() +
-  scale_fill_viridis_c(option = "magma", direction = -1, begin = 0.2, end = 0.9) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
   labs(
-    title = "Language Endangerment by Family",
-    subtitle = "Percentage of languages with <10,000 speakers (families with 3+ languages)",
-    x = NULL,
-    y = "% Endangered",
-    caption = "Labels show endangered/total languages"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  xlim(rev(levels(reorder(endangered_by_family$family, endangered_by_family$pct_endangered)))) +
-  ylim(0, max(endangered_by_family$pct_endangered) * 1.15)
+    title = "Smaller Families Face the Highest Endangerment Rates",
+    subtitle = "Percentage of languages with <10,000 speakers (families with 3+ languages) \u2014 labels show endangered/total",
+    x = NULL, y = "% Endangered"
+  )
 ```
 
 ---
 
-## Geographic Diversity: Linguistically Rich Countries
+## Geographic Diversity: Cameroon Leads Africa
 
 ### Map of Linguistic Diversity
 
 ```{r}
+#| fig-cap: "Choropleth map of linguistic diversity across Africa. Grey countries are absent from the dataset."
+#| fig-alt: "Map of Africa coloured by number of distinct languages per country, with Cameroon and Congo darkest."
 #| fig.height: 8
+
 africa_map <- ne_countries(continent = "Africa", returnclass = "sf", scale = "medium")
 
 country_diversity <- africa |>
@@ -255,55 +325,76 @@ country_diversity <- africa |>
   ) |>
   arrange(desc(n_languages))
 
+# Reconcile country names between dataset and rnaturalearth
+name_lookup <- c(
+  "Cape Verde"               = "Cabo Verde",
+  "Central African Republic" = "Central African Rep.",
+  "Equatorial Guinea"        = "Eq. Guinea",
+  "Eswatini"                 = "eSwatini",
+  "Ivory Coast"              = "Côte d'Ivoire",
+  "South Sudan"              = "S. Sudan"
+)
+
+country_diversity_map <- country_diversity |>
+  mutate(map_name = if_else(country %in% names(name_lookup),
+                             name_lookup[country], country))
+
 africa_map_data <- africa_map |>
-  left_join(country_diversity, by = c("name" = "country"))
+  left_join(country_diversity_map, by = c("name" = "map_name"))
 
 ggplot(africa_map_data) +
   geom_sf(aes(fill = n_languages), color = "white", linewidth = 0.3) +
-  scale_fill_viridis_c(option = "mako", direction = -1, na.value = "grey90",
-                        name = "Languages") +
+  scale_fill_gradient(low = sky, high = navy, na.value = "grey90",
+                       name = "Languages") +
   labs(
     title = "Linguistic Diversity Across Africa",
-    subtitle = "Number of distinct languages per country",
-    caption = "Grey countries: not present in dataset"
+    subtitle = "Number of distinct languages per country \u2014 grey countries not present in dataset",
+    caption = "Source: Wikipedia, Languages of Africa | TidyTuesday 2026 Week 3"
   ) +
-  theme_minimal() +
   theme(
     axis.text = element_blank(),
     axis.title = element_blank(),
-    panel.grid = element_blank()
+    panel.grid = element_blank(),
+    legend.position = "right"
   )
 ```
 
 ### Top 15 Most Linguistically Diverse Countries
 
 ```{r}
+#| fig-cap: "Top 15 countries by number of distinct languages."
+#| fig-alt: "Horizontal bar chart of countries ranked by language count, Cameroon leading."
+#| fig.height: 6
+
 top_countries <- country_diversity |>
   slice_max(n_languages, n = 15)
 
-ggplot(top_countries, aes(x = reorder(country, n_languages), y = n_languages, fill = n_languages)) +
-  geom_col() +
+ggplot(top_countries, aes(x = reorder(country, n_languages), y = n_languages)) +
+  geom_col(fill = navy, width = 0.65, alpha = 0.85) +
+  geom_text(aes(label = n_languages), hjust = -0.3, size = 3.5,
+            fontface = "bold", family = "outfit", color = ink) +
   coord_flip() +
-  scale_fill_viridis_c(option = "mako", direction = -1) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
   labs(
-    title = "Most Linguistically Diverse African Countries",
-    subtitle = "Number of distinct languages per country",
-    x = NULL,
-    y = "Number of Languages",
-    fill = "Languages"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none")
+    title = glue("Cameroon Leads with {max(top_countries$n_languages)} Languages"),
+    subtitle = glue(
+      "Top 15 most linguistically diverse African countries \u2014 representing ",
+      "{n_distinct(africa$family[africa$country %in% top_countries$country])} ",
+      "different language families"
+    ),
+    x = NULL, y = "Number of Languages"
+  )
 ```
-
-**Key Finding**: Nigeria leads with `r max(country_diversity$n_languages)` languages, representing `r n_distinct(africa$family[africa$country == "Nigeria"])` different language families. This reflects the country's diverse ethnic composition and geography.
 
 ---
 
 ## Language Families by Region
 
 ```{r}
+#| fig-cap: "Heatmap of language counts by family and country for the top 8 families and 20 most diverse countries."
+#| fig-alt: "Heatmap matrix with countries on the y-axis and language families on the x-axis, coloured by language count."
 #| fig.height: 8
+
 family_country <- africa |>
   group_by(country, family) |>
   summarize(n_languages = n_distinct(language), .groups = "drop")
@@ -323,22 +414,22 @@ heatmap_data <- family_country |>
 
 ggplot(heatmap_data, aes(x = family, y = reorder(country, n_languages), fill = n_languages)) +
   geom_tile(color = "white", linewidth = 0.5) +
-  scale_fill_viridis_c(option = "inferno", begin = 0.1, end = 0.9, direction = -1,
-                        name = "Languages") +
+  geom_text(aes(label = n_languages), size = 3, family = "outfit", color = "white",
+            fontface = "bold") +
+  scale_fill_gradient(low = sky, high = navy, name = "Languages") +
   labs(
-    title = "Language Families Across Africa's Most Diverse Countries",
-    subtitle = "Number of languages per family in each country",
-    x = "Language Family",
-    y = NULL
+    title = "Niger\u2013Congo Dominates West and Central Africa",
+    subtitle = "Language count by family across the 20 most diverse countries \u2014 top 8 families shown",
+    x = NULL, y = NULL
   ) +
-  theme_minimal() +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
-    panel.grid = element_blank()
+    panel.grid = element_blank(),
+    legend.position = "right"
   )
 ```
 
-**Key Finding**: Niger-Congo languages dominate across West and Central Africa, while Afro-Asiatic languages are concentrated in North and East African countries. Some countries like Nigeria and Cameroon show remarkable family-level diversity, hosting languages from multiple distinct families.
+Niger--Congo languages dominate across West and Central Africa, while Afroasiatic languages concentrate in North and East Africa. Countries like Nigeria and Cameroon host languages from multiple distinct families.
 
 ---
 
@@ -347,35 +438,36 @@ ggplot(heatmap_data, aes(x = family, y = reorder(country, n_languages), fill = n
 Languages that transcend national boundaries often serve as regional lingua francas and trade languages.
 
 ```{r}
-cross_border <- africa |>
+cross_border_detail <- africa |>
   group_by(language) |>
   summarize(
     countries = n_distinct(country),
     speakers = max(native_speakers),
-    country_list = paste(unique(country), collapse = ", ")
+    country_list = paste(unique(country), collapse = ", "),
+    .groups = "drop"
   ) |>
   filter(countries > 1) |>
   arrange(desc(countries))
 
-cross_border |>
+cross_border_detail |>
   slice_max(countries, n = 10) |>
   select(Language = language, Countries = countries,
-         `Native Speakers` = speakers) |>
+         `Native Speakers (L1)` = speakers) |>
   arrange(desc(Countries)) |>
-  mutate(`Native Speakers` = comma(`Native Speakers`)) |>
+  mutate(`Native Speakers (L1)` = comma(`Native Speakers (L1)`)) |>
   knitr::kable(align = "lrr")
 ```
 
-**Key Finding:** Arabic is the most widespread language, spoken in 12 countries. Fulani spans 10 countries across West Africa, while Mooré and Soninke are each found in 8 nations.
+Arabic is the most widespread language, spoken across 12 countries. Fulani spans 10 countries across West Africa, while Moor&eacute; and Soninke are each found in 8 nations. In total, `r nrow(cross_border_detail)` languages (`r round(100 * nrow(cross_border_detail) / total_languages, 0)`%) cross at least one national border.
 
 ## Conclusion
 
 Africa's linguistic landscape reveals:
 
--   **Extraordinary diversity** - Over 500 languages across 17 families
--   **Uneven distribution** - Niger–Congo dominates, but significant representation from Afroasiatic and Nilo-Saharan families
--   **Regional concentration** - Nigeria, Cameroon, and West African nations show the highest diversity
--   **Cross-border connections** - Many languages unite people across colonial boundaries
--   **Conservation concerns** - Nearly a quarter of languages have vulnerable speaker populations
+- **Extraordinary diversity** --- Over `r total_languages` languages across `r total_families` families
+- **Uneven distribution** --- Niger--Congo dominates in language count, but Afroasiatic rivals it in total speakers
+- **Regional concentration** --- Cameroon, Congo, and Nigeria show the highest diversity
+- **Cross-border connections** --- `r nrow(cross_border_detail)` languages unite people across national boundaries
+- **Conservation concerns** --- Nearly a quarter of languages have vulnerable speaker populations
 
 This rich linguistic heritage represents both a cultural treasure and a conservation challenge for the continent.
