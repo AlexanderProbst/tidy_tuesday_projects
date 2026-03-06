@@ -61,19 +61,40 @@ theme_set(
 
 ```{r}
 daily_accidents <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents.csv')
+daily_accidents_420_time <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-04-22/daily_accidents_420_time.csv')
 ```
 
 ## Background
 
-In 2018, Harper and Palayew published a study in *JAMA Internal Medicine* examining whether April 20th --- widely associated with cannabis celebration --- sees an increase in fatal traffic accidents in the United States. Using data from the Fatality Analysis Reporting System (FARS), they reported a statistically significant increase in crash risk on 4/20 compared to control dates one week before and after.
+In 2018, Staples and Redelmeier published a study in *JAMA Internal Medicine* claiming that April 20th --- widely associated with cannabis celebration --- sees a significant increase in fatal traffic accidents in the United States. Analysing crashes between 4:20 PM and midnight using data from the Fatality Analysis Reporting System (FARS), they reported a 12% increase in crash risk on 4/20 compared to control dates one week before and after (April 13th and April 27th).
 
-This finding attracted considerable attention, but also scrutiny. Critics noted that the choice of control dates and analytical decisions could influence the result. This report revisits the question using FARS-derived data from TidyTuesday, exploring whether the "4/20 effect" holds up under visual and statistical examination.
+This finding attracted considerable attention, but also scrutiny. In 2019, Harper and Palayew revisited the question in *BMJ Injury Prevention*, using more robust methods, a broader set of control dates, and a more comprehensive time window. Crucially, they also compared the supposed 4/20 effect against those for other major US holidays. They **could not replicate the signal** for April 20th, though they did find genuine increases for holidays such as July 4th. Their work highlighted how analytical choices --- control date selection, time windows, and statistical methods --- can produce or eliminate apparent effects.
+
+This report revisits the question using the same FARS-derived dataset from TidyTuesday. We focus on the **4:20 PM to midnight time window** and compare April 20th to control dates one week before and after (April 13th and April 27th).
 
 ---
 
 ## Data Overview
 
 ```{r}
+# The time-window dataset: d420=TRUE means 4:20 PM to midnight on any day
+# Filter to just that window for apples-to-apples comparison
+evening_data <- daily_accidents_420_time |>
+  filter(d420 == TRUE) |>
+  mutate(
+    year   = year(date),
+    month  = month(date),
+    day    = day(date),
+    wday   = wday(date, label = TRUE),
+    is_420 = month == 4 & day == 20
+  )
+
+# Control dates: April 13 and April 27 (one week before/after)
+study_data <- evening_data |>
+  filter(month == 4 & day %in% c(13, 20, 27)) |>
+  mutate(group = if_else(is_420, "April 20th", "Control Dates"))
+
+# Full daily data for broader context
 daily_full <- daily_accidents |>
   mutate(
     year   = year(date),
@@ -83,25 +104,18 @@ daily_full <- daily_accidents |>
     is_420 = month == 4 & day == 20
   )
 
-# Define control dates: April 13 and April 27 (one week before/after)
-# This matches the original Harper & Palayew control strategy
-study_data <- daily_full |>
-  filter(month == 4 & day %in% c(13, 20, 27)) |>
-  mutate(group = if_else(is_420, "April 20th", "Control Dates"))
-
-year_range <- range(daily_full$year)
-n_total    <- nrow(daily_full)
+year_range <- range(study_data$year)
 n_420      <- sum(study_data$is_420)
 n_ctrl     <- sum(!study_data$is_420)
 ```
 
-The dataset contains **`r comma(n_total)` daily observations** of fatal traffic accidents in the US, spanning **`r year_range[1]`--`r year_range[2]`**.
+The `daily_accidents_420_time` dataset counts fatal traffic accidents during the **4:20 PM to midnight window** for every day from `r year_range[1]` to `r year_range[2]`. This matches the time window used in the original Staples & Redelmeier study.
 
-Following the original Harper & Palayew design, we compare April 20th to **control dates one week before and after** (April 13th and April 27th). This yields **`r n_420` April 20th observations** and **`r n_ctrl` control observations** across the study period.
+Following their design, we compare April 20th to **control dates one week before and after** (April 13th and April 27th), yielding **`r n_420` April 20th observations** and **`r n_ctrl` control observations**.
 
 | Metric | Value |
 |--------|-------|
-| Full dataset observations | `r comma(n_total)` |
+| Time window | 4:20 PM -- midnight |
 | Date range | `r year_range[1]`--`r year_range[2]` |
 | April 20th observations | `r n_420` |
 | Control date observations | `r n_ctrl` |
@@ -110,39 +124,11 @@ Following the original Harper & Palayew design, we compare April 20th to **contr
 
 ## Visual Exploration
 
-### Daily Fatalities Over Time
+### The 4:20 PM--Midnight Window: 4/20 vs. Control Dates
 
 ```{r}
-#| fig-cap: "Daily traffic fatalities over the study period with April 20th dates highlighted."
-#| fig-alt: "Scatter plot showing daily fatalities from 1975 to 2018 with 4/20 dates in red and all other dates in grey."
-
-ggplot(daily_full, aes(date, fatalities_count)) +
-  geom_point(data = filter(daily_full, !is_420),
-             color = grey_m, size = 0.4, alpha = 0.15) +
-  geom_smooth(method = "loess", se = FALSE, color = blue,
-              linewidth = 0.7, alpha = 0.5) +
-  geom_point(data = filter(daily_full, is_420),
-             fill = red, color = "white", size = 3.2,
-             shape = 21, stroke = 0.7) +
-  scale_y_continuous(expand = expansion(mult = c(0.02, 0.05))) +
-  labs(
-    title = "Daily Traffic Fatalities, {year_range[1]}\u2013{year_range[2]}" |>
-      glue(),
-    subtitle = glue(
-      "<span style='color:{red}'>**\u25CF April 20th**</span> dates shown against ",
-      "<span style='color:{grey_m}'>**all other days**</span>"
-    ),
-    x = NULL, y = NULL
-  )
-```
-
-The overall downward trend in fatalities across the study period is immediately apparent. April 20th dates appear scattered within the range of their surrounding dates, with no obvious visual outliers.
-
-### Direct Comparison: 4/20 vs. Control Dates
-
-```{r}
-#| fig-cap: "Raincloud plot comparing fatality distributions on April 20th and control dates (April 13 and 27)."
-#| fig-alt: "Half-violin density, boxplot, and jittered points comparing April 20th to control date fatalities."
+#| fig-cap: "Raincloud plot comparing fatality distributions in the 4:20 PM--midnight window on April 20th versus control dates."
+#| fig-alt: "Half-violin density, boxplot, and jittered points comparing April 20th to control date fatalities in the evening window."
 #| fig.height: 4.5
 
 comparison_data <- study_data |>
@@ -170,13 +156,13 @@ ggplot(comparison_data, aes(x = group, y = fatalities_count, fill = group, color
   scale_color_manual(values = c("April 20th" = red, "Control Dates" = blue)) +
   coord_flip(clip = "off") +
   labs(
-    title = "April 20th vs. Control Dates (April 13 & 27)",
+    title = "Evening Fatalities: April 20th vs. Control Dates",
     subtitle = glue(
       "<span style='color:{red}'>**April 20th**</span> vs. ",
-      "<span style='color:{blue}'>**control dates**</span> one week before & after ",
-      "&mdash; density, box plot, and raw observations"
+      "<span style='color:{blue}'>**April 13 & 27**</span> ",
+      "&mdash; 4:20 PM to midnight only"
     ),
-    x = NULL, y = "Fatalities"
+    x = NULL, y = "Fatalities (4:20 PM\u2013midnight)"
   ) +
   theme(
     axis.text.y  = element_text(face = "bold", size = 11),
@@ -195,16 +181,16 @@ summary_stats <- comparison_data |>
     .groups = "drop"
   )
 
-knitr::kable(summary_stats, caption = "Summary statistics by group")
+knitr::kable(summary_stats, caption = "Summary statistics by group (4:20 PM\u2013midnight window)")
 ```
 
 ### Year-by-Year Comparison
 
-How does April 20th compare to its control dates within each year? This dumbbell view controls for the secular trend.
+How does April 20th's evening window compare to its control dates within each year? This dumbbell view controls for the secular trend.
 
 ```{r}
-#| fig-cap: "Dumbbell plot showing April 20th fatality count versus the control-date mean for each year."
-#| fig-alt: "Horizontal dumbbell chart comparing April 20th fatality value to control mean per year."
+#| fig-cap: "Dumbbell plot showing April 20th evening fatalities versus the control-date mean for each year."
+#| fig-alt: "Horizontal dumbbell chart comparing April 20th to control mean per year in the 4:20 PM--midnight window."
 #| fig.height: 7
 
 yearly_ctrl <- comparison_data |>
@@ -241,7 +227,7 @@ ggplot(paired, aes(y = factor(year))) +
       "<span style='color:{blue}'>**\u25CF control mean**</span> \u2014 ",
       "4/20 exceeds controls in {n_above} of {n_years} years"
     ),
-    x = "Fatalities", y = NULL
+    x = "Fatalities (4:20 PM\u2013midnight)", y = NULL
   ) +
   theme(
     panel.grid.major.y = element_blank(),
@@ -255,11 +241,11 @@ ggplot(paired, aes(y = factor(year))) +
 Traffic fatalities follow strong weekly cycles --- weekends are deadlier. If April 20th disproportionately falls on certain weekdays, this could confound the comparison.
 
 ```{r}
-#| fig-cap: "Average daily fatalities by day of the week, showing the weekend spike."
-#| fig-alt: "Bar chart of average fatalities by day of week with values labeled."
+#| fig-cap: "Average evening-window fatalities by day of the week, showing the weekend spike."
+#| fig-alt: "Bar chart of average 4:20 PM--midnight fatalities by day of week with values labeled."
 #| fig.height: 4
 
-dow_data <- daily_full |>
+dow_data <- evening_data |>
   group_by(wday) |>
   summarise(m = mean(fatalities_count), .groups = "drop") |>
   mutate(is_weekend = wday %in% c("Fri", "Sat", "Sun"))
@@ -273,13 +259,13 @@ ggplot(dow_data, aes(wday, m, fill = is_weekend)) +
   scale_fill_manual(values = c("TRUE" = red, "FALSE" = blue)) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
   labs(
-    title = "The Weekend Effect",
+    title = "The Weekend Effect (Evening Window)",
     subtitle = glue(
       "<span style='color:{red}'>**Fri\u2013Sun**</span> show substantially higher ",
       "fatality counts than <span style='color:{blue}'>**weekdays**</span> ",
       "&mdash; a key confound to control for"
     ),
-    x = NULL, y = "Mean fatalities"
+    x = NULL, y = "Mean fatalities (4:20 PM\u2013midnight)"
   )
 ```
 
@@ -309,11 +295,11 @@ knitr::kable(
   tidy_model |>
     select(Term = term, Estimate = estimate, SE = std.error,
            `CI Low` = conf.low, `CI High` = conf.high, p = p.value),
-  caption = "Linear regression: fatalities ~ April 20th + year + day-of-week"
+  caption = "Linear regression: fatalities ~ April 20th + year + day-of-week (4:20 PM\u2013midnight window)"
 )
 ```
 
-**Key result**: The estimated effect of April 20th is **`r effect_row$estimate` fatalities** compared to control dates (95% CI: `r effect_row$conf.low` to `r effect_row$conf.high`, p = `r effect_row$p.value`). The model explains **`r round(glance_model$r.squared * 100, 1)`%** of variance.
+**Key result**: The estimated effect of April 20th is **`r effect_row$estimate` fatalities** in the evening window compared to control dates (95% CI: `r effect_row$conf.low` to `r effect_row$conf.high`, p = `r effect_row$p.value`). The model explains **`r round(glance_model$r.squared * 100, 1)`%** of variance.
 
 ```{r}
 #| fig-cap: "Day-of-week effect and April 20th model coefficient with 95% confidence intervals."
@@ -342,7 +328,7 @@ p_dow <- ggplot(dow_emm, aes(x = emmean, y = reorder(wday, emmean))) +
   labs(
     title = "Day-of-Week Effect",
     subtitle = "Mean fatalities \u00b1 95% CI per weekday",
-    x = "Mean daily fatalities", y = NULL
+    x = "Mean fatalities (4:20 PM\u2013midnight)", y = NULL
   ) +
   theme(panel.grid.major.y = element_blank())
 
@@ -374,7 +360,7 @@ p_dow + p_420 + plot_layout(widths = c(1.4, 1))
 
 ### Zooming Out: All Calendar Dates
 
-Does April 20th stand out among *all* calendar dates, not just its immediate neighbours?
+Does April 20th stand out among *all* calendar dates when we look at total daily fatalities?
 
 ```{r}
 #| fig-cap: "Average fatalities for each of the 366 possible calendar dates, with April 20th highlighted. The seasonal curve peaks in summer."
@@ -460,13 +446,13 @@ ggplot(monthly_data, aes(month_label, fatalities_count, fill = is_april)) +
 sig <- effect_row$p.value < 0.05
 ```
 
-`r if(sig && effect_row$estimate > 0) paste0("The analysis finds a statistically significant increase: April 20th is associated with **", effect_row$estimate, " additional fatalities** compared to control dates one week before and after, after adjusting for year trends and day-of-week effects (p = ", effect_row$p.value, "). This is directionally consistent with the original Harper & Palayew finding, though the visual evidence suggests April 20th is far from exceptional when viewed alongside all calendar dates.") else if(sig && effect_row$estimate < 0) paste0("The analysis finds a statistically significant *decrease*: April 20th is associated with **", abs(effect_row$estimate), " fewer fatalities** than control dates (p = ", effect_row$p.value, "). This contradicts the original Harper & Palayew finding.") else paste0("After controlling for year trends and day-of-week effects, the estimated 4/20 effect is ", effect_row$estimate, " fatalities (p = ", effect_row$p.value, "), which is **not statistically significant** at the conventional 0.05 threshold. The confidence interval spans from ", effect_row$conf.low, " to ", effect_row$conf.high, ", consistent with the visual evidence throughout this report: April 20th appears unremarkable compared to control dates and to all other calendar dates.")`
+`r if(sig && effect_row$estimate > 0) paste0("The analysis finds a statistically significant increase in the 4:20 PM\u2013midnight window: April 20th is associated with **", effect_row$estimate, " additional fatalities** compared to control dates, after adjusting for year and day-of-week (p = ", effect_row$p.value, "). This is directionally consistent with the original Staples & Redelmeier claim, though it contradicts the more robust Harper & Palayew reanalysis that found no such effect.") else if(sig && effect_row$estimate < 0) paste0("The analysis finds a statistically significant *decrease* in the evening window: April 20th is associated with **", abs(effect_row$estimate), " fewer fatalities** than control dates (p = ", effect_row$p.value, "). This contradicts the original Staples & Redelmeier claim and is consistent with Harper & Palayew\u2019s finding of no meaningful 4/20 effect.") else paste0("After controlling for year trends and day-of-week effects, the estimated 4/20 effect in the evening window is ", effect_row$estimate, " fatalities (p = ", effect_row$p.value, "), which is **not statistically significant** at the conventional 0.05 threshold. The confidence interval spans from ", effect_row$conf.low, " to ", effect_row$conf.high, ". This is consistent with Harper & Palayew\u2019s conclusion that the original Staples & Redelmeier finding does not hold up under more robust analysis.")`
 
-However, several caveats are worth noting:
+Several caveats are worth noting:
 
-- **Small sample of 4/20 dates**: With only `r n_420` April 20th observations, statistical power is limited.
-- **Control date selection matters**: The original study's choice of control dates (one week before/after) has been debated. Different control strategies can shift the result.
-- **Correlation vs. causation**: Even a significant association would not prove that cannabis use caused additional crashes --- other April 20th-specific factors (spring weather, events) could contribute.
-- **Secular trend**: The strong downward trend in fatalities over the study period highlights how important it is to adjust for year when making comparisons.
+- **Small sample**: With only `r n_420` April 20th observations, statistical power is limited.
+- **Control date selection matters**: The original Staples & Redelmeier study's choice of control dates (one week before/after) has been debated. Different control strategies can shift the result --- a key point Harper & Palayew demonstrated.
+- **Correlation vs. causation**: Even a significant association would not prove that cannabis use caused additional crashes --- other April 20th-specific factors could contribute.
+- **This is a lesson in analytical choices**: As the TidyTuesday curators note, this dataset is "a great example of how charts can mislead based on choices in analysis and plotting."
 
-The question of whether 4/20 poses a genuine traffic safety risk remains open. The effect, if real, is small relative to well-established risk factors like weekends, holidays, and weather --- factors that any traffic safety intervention should prioritize first.
+The question of whether 4/20 poses a genuine traffic safety risk appears to be resolved: the effect claimed by Staples & Redelmeier does not survive more careful analysis. The day-of-week effect dwarfs any plausible April 20th signal, and the date is unremarkable when viewed among all calendar dates.
