@@ -63,7 +63,7 @@ theme_set(
 ```
 
 ```{r}
-africa_raw <- read_csv(here::here("data", "2026", "africa_data.csv"))
+africa_raw <- read_csv("data/2026/africa_data.csv")
 
 # -- Data cleaning --
 # The raw data has family-level quality issues from Wikipedia scraping:
@@ -435,7 +435,7 @@ Niger--Congo languages dominate across West and Central Africa, while Afroasiati
 
 ## Cross-Border Languages: Linguistic Bridges
 
-Languages that transcend national boundaries often serve as regional lingua francas and trade languages.
+Some languages are spoken across many national borders. Note that this table reflects **official language status per country** as recorded on Wikipedia --- it understates the true reach of major lingua francas. Swahili, for example, appears in only 5 countries here but is widely spoken as a second language across much of East and Central Africa.
 
 ```{r}
 cross_border_detail <- africa |>
