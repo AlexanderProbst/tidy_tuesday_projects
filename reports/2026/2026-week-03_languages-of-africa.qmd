@@ -347,7 +347,7 @@ ggplot(africa_map_data) +
   scale_fill_gradient(low = sky, high = navy, na.value = "grey90",
                        name = "Languages") +
   labs(
-    title = "Linguistic Diversity Across Africa",
+    title = "West and Central Africa Concentrate the Greatest Linguistic Diversity",
     subtitle = "Number of distinct languages per country \u2014 grey countries not present in dataset",
     caption = "Source: Wikipedia, Languages of Africa | TidyTuesday 2026 Week 3"
   ) +
@@ -414,8 +414,10 @@ heatmap_data <- family_country |>
 
 ggplot(heatmap_data, aes(x = family, y = reorder(country, n_languages), fill = n_languages)) +
   geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = n_languages), size = 3, family = "outfit", color = "white",
-            fontface = "bold") +
+  geom_text(aes(label = n_languages,
+                color = if_else(n_languages >= 15, "white", ink)),
+            size = 3, family = "outfit", fontface = "bold") +
+  scale_color_identity() +
   scale_fill_gradient(low = sky, high = navy, name = "Languages") +
   labs(
     title = "Niger\u2013Congo Dominates West and Central Africa",
